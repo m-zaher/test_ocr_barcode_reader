@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>OCR Number Detection</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+        }
+
+        video,
+        canvas {
+            border: 2px solid black;
+            margin: 10px;
+        }
+
+        #roi {
+            position: absolute;
+            border: 2px dashed red;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>قراءة رقم النموذج بالكاميرا</h2>
+    <video id="video" width="640" height="480" autoplay></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <div id="roi" style="width:300px;height:100px;top:190px;left:170px;"></div>
+    <p><b>الرقم المكتشف:</b> <span id="output">-</span></p>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const output = document.getElementById('output');
+
+        // ROI
+        const roi = { x: 170, y: 190, w: 300, h: 100 };
+        let detected = false;
+
+        // Start camera
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(stream => video.srcObject = stream)
+            .catch(err => console.error("Camera error: ", err));
+
+        async function captureAndRead() {
+            if (detected) return; // stop if already detected
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const roiData = ctx.getImageData(roi.x, roi.y, roi.w, roi.h);
+
+            // Create offscreen canvas for ROI
+            const roiCanvas = document.createElement('canvas');
+            roiCanvas.width = roi.w;
+            roiCanvas.height = roi.h;
+            const roiCtx = roiCanvas.getContext('2d');
+            roiCtx.putImageData(roiData, 0, 0);
+
+            try {
+                const result = await Tesseract.recognize(roiCanvas, 'eng', {
+                    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                });
+                const text = result.data.text.replace(/\s+/g, "");
+                console.log("OCR Raw:", text);
+
+                // Regex: ECP + 8 digits + EG
+                const match = text.match(/ECP\d{8}EG/);
+                if (match) {
+                    output.textContent = match[0];
+                    detected = true;
+                }
+            } catch (e) {
+                console.error("OCR Error", e);
+            }
+
+            requestAnimationFrame(captureAndRead);
+        }
+
+        video.addEventListener('playing', () => {
+            requestAnimationFrame(captureAndRead);
+        });
+    </script>
+</body>
+
+</html>
