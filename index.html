@@ -2,9 +2,10 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Debuggable Single Page</title>
+  <title>OCR Tawkeel — Full Debuggable</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- حاول النسخة الافتراضية؛ إن ظهر خطأ worker.load is not a function استبدل السطر أعلاه بالـ CDN الخاص بالإصدارات القديمة كما في الملاحظة أعلاه -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; text-align:center; padding:12px; direction:rtl; }
     .viewer { position:relative; display:inline-block; margin-top:8px; }
@@ -20,14 +21,12 @@
     button { padding:8px 12px; }
     #result { font-weight:bold; color:green; min-height:22px; }
     #errorLine { color:#b00; font-weight:bold; min-height:18px; }
-    table { width:100%; border-collapse:collapse; font-size:13px; }
-    td, th { border:1px solid #eee; padding:6px; text-align:left; }
     small.gray { color:#666; }
     @media (max-width:700px) { video { width:360px; height:270px; } }
   </style>
 </head>
 <body>
-  <h2>OCR Tawkeel — صفحة تصحيح وتشغيل متقدّم</h2>
+  <h2>OCR Tawkeel — صفحة تشغيل وتصحيح متقدّم</h2>
 
   <div class="viewer" id="viewerRoot">
     <video id="video" autoplay playsinline muted></video>
@@ -43,7 +42,8 @@
   </div>
 
   <div id="info">
-    <div class="row"><div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
+    <div class="row">
+      <div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
       <div id="errorLine"></div>
     </div>
 
@@ -66,7 +66,7 @@
       </select>
 
       <label>Threshold</label>
-      <input id="threshRange" type="range" min="80" max="200" value="140">
+      <input id="threshRange" type="range" min="80" max="220" value="140">
       <span id="threshVal">140</span>
     </div>
 
@@ -75,7 +75,7 @@
       <input id="sharpenRange" type="range" min="0" max="3" step="0.5" value="1.0">
       <span id="sharpenVal">1.0</span>
 
-      <label>Median blur</label>
+      <label>Median blur passes</label>
       <input id="medianRange" type="range" min="0" max="2" step="1" value="1">
       <span id="medianVal">1</span>
 
@@ -103,11 +103,10 @@
       </div>
     </div>
 
-    <div style="margin-top:10px;"><strong>سجل التشغيل (تلقى رسائل الخطأ والتقدم هنا)</strong></div>
+    <div style="margin-top:10px;"><strong>سجل التشغيل (رسائل الأخطاء والتقدم)</strong></div>
     <pre id="log">جاري التهيئة...</pre>
   </div>
 
-  <!-- كانڤاسات مخفية للمعالجة -->
   <canvas id="fullCanvas" style="display:none"></canvas>
   <canvas id="roiCanvas" style="display:none"></canvas>
 
@@ -150,7 +149,9 @@ const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW
 
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
-let worker = null, scanning = true, ocrRunning = false;
+let worker = null;
+let createWorkerFn = null;
+let scanning = true, ocrRunning = false;
 let lastAttempt = 0, lastText = null, stableCount = 0;
 const minInterval = 400, requiredStable = 2;
 
@@ -160,42 +161,92 @@ function appendLog(line){
 }
 function setError(msg){ errorLine.textContent = msg || ''; }
 
+/* start camera */
 function startCamera(){
   navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width:{ ideal:1280 }, height:{ ideal:720 } } })
     .then(s => { video.srcObject = s; appendLog('Camera stream started'); })
-    .catch(e => {
-      appendLog('Camera error: ' + (e && e.message ? e.message : e));
-      setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e));
-    });
+    .catch(e => { appendLog('Camera error: ' + (e && e.message ? e.message : e)); setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e)); });
 }
 
-// Initialise Tesseract worker with logger forwarded to page
-(async function initWorker(){
-  appendLog('تحميل عامل Tesseract...');
-  worker = Tesseract.createWorker({
-    logger: m => {
-      // forward key messages to log area
-      appendLog(`Tesseract: ${m.status} ${(m.progress || '').toString().slice(0,6)}`);
-    }
-  });
-  try {
-    await worker.load();
-    appendLog('worker.load OK');
-    await worker.loadLanguage('eng');
-    appendLog('language loaded: eng');
-    await worker.initialize('eng');
-    appendLog('worker initialized');
-    // keep parameters set later before each recognize to allow PSM change
-    workerReady = true;
-    appendLog('Worker ready');
-    if (videoReady) startLoop();
-  } catch (err){
-    appendLog('Worker init error: ' + err);
-    setError('خطأ بتهيئة Tesseract: ' + (err && err.message ? err.message : err));
-  }
-})();
+/* ---------- Compat initWorker: يحاول createWorker ثم fallback إلى recognize ---------- */
+const PSM = (typeof Tesseract !== 'undefined' && Tesseract.PSM) ? Tesseract.PSM : null;
+const OEM = (typeof Tesseract !== 'undefined' && Tesseract.OEM) ? Tesseract.OEM : null;
 
-// ROI / preview positioning
+async function initWorker() {
+  appendLog('بدء تهيئة Tesseract (محاولة توافقية)...');
+
+  if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
+    createWorkerFn = Tesseract.createWorker;
+    appendLog('استخدمنا Tesseract.createWorker مباشرة');
+  } else if (typeof Tesseract !== 'undefined' && Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
+    createWorkerFn = Tesseract.default.createWorker;
+    appendLog('استخدمنا Tesseract.default.createWorker');
+  } else {
+    appendLog('createWorker غير متاحة في كائن Tesseract المحمّل؛ سنحاول fallback عبر Tesseract.recognize إن امكن');
+  }
+
+  if (createWorkerFn) {
+    try {
+      worker = createWorkerFn({
+        logger: m => { appendLog('Tesseract: ' + (m.status || '') + ' ' + ((m.progress||'')*100).toString().slice(0,6)); }
+      });
+      await worker.load();
+      appendLog('worker.load OK');
+      await worker.loadLanguage('eng');
+      appendLog('language loaded: eng');
+      await worker.initialize('eng');
+      appendLog('worker initialized OK');
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ECP0123456789EG',
+        tessedit_ocr_engine_mode: OEM ? OEM.LSTM_ONLY : 1,
+        tessedit_pageseg_mode: (PSM && PSM.SINGLE_LINE) ? PSM.SINGLE_LINE : 7
+      });
+      workerReady = true;
+      appendLog('Worker ready (via createWorker)');
+      if (videoReady) startLoop();
+      return;
+    } catch (err) {
+      appendLog('خطأ أثناء init worker: ' + err);
+      setError('خطأ init worker: ' + (err && err.message ? err.message : err));
+      worker = null;
+    }
+  }
+
+  // fallback: use Tesseract.recognize if available
+  if (typeof Tesseract !== 'undefined' && typeof Tesseract.recognize === 'function') {
+    appendLog('استخدام fallback: Tesseract.recognize متوفر');
+    worker = {
+      recognize: async (blob, opts = {}) => {
+        const url = URL.createObjectURL(blob);
+        try {
+          const res = await Tesseract.recognize(url, 'eng', {
+            tessedit_char_whitelist: 'ECP0123456789EG',
+            tessedit_pageseg_mode: Number(psmSelect.value) || 7
+          });
+          URL.revokeObjectURL(url);
+          return res;
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          throw e;
+        }
+      },
+      setParameters: async () => {},
+      terminate: async () => {}
+    };
+    workerReady = true;
+    appendLog('Fallback recognize جاهز (أبطأ لكن مفيد للتشخيص)');
+    if (videoReady) startLoop();
+    return;
+  }
+
+  appendLog('لم نجد واجهة Tesseract مناسبة. رجاءً استخدم CDN متوافق (مثلاً: https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js)');
+  setError('لم يتم تحميل واجهة Tesseract المناسبة. جرب نسخة CDN متوافقة.');
+}
+/* call init */
+initWorker();
+/* ---------- end initWorker ---------- */
+
+/* ROI / preview positioning functions */
 function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -214,7 +265,6 @@ function positionROI(){
   previewCanvas.height = boxH;
 }
 
-// compute ROI in fullCanvas coordinates
 function computeROIforCapture(){
   const vRect = video.getBoundingClientRect();
   const vw = vRect.width, vh = vRect.height;
@@ -230,7 +280,7 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-// image processing helpers
+/* image processing helpers */
 function grayscaleContrast(data, contrastFactor){
   const intercept = 128 * (1 - contrastFactor);
   for (let i = 0; i < data.length; i += 4){
@@ -286,114 +336,77 @@ function thresholdBinary(data, t){
   }
   return whiteCount;
 }
-function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; } }
+function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
 
-// prepare blob with tunables and diagnostics
+/* prepare blob with tunables and diagnostics */
 async function prepareROIBlob(){
-  try {
-    fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-  } catch (e){
-    appendLog('خطأ أثناء رسم الفريم: ' + e);
-    setError('خطأ رسم الفريم: ' + (e && e.message ? e.message : e));
-    return null;
-  }
+  try { fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height); }
+  catch(e){ appendLog('خطأ أثناء drawImage: ' + e); setError('خطأ رسم الفريم'); return null; }
   const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
-  if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الإطار'); setError('ROI غير داخل إطار الفيديو'); return null; }
-
-  // upscale factor from select
+  if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الفيديو'); setError('ROI غير داخل إطار الفيديو'); return null; }
   const factor = Number(upscaleSelect.value) || 2;
   const targetW = Math.max(120, Math.round(dstW * factor));
   const targetH = Math.max(24, Math.round(dstH * factor));
-  roiCanvas.width = targetW;
-  roiCanvas.height = targetH;
+  roiCanvas.width = targetW; roiCanvas.height = targetH;
   roiCtx.clearRect(0,0,targetW,targetH);
-
-  // safe bounds
   const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
   const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
   const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
   const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
-
-  // draw cropped resized ROI
   roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
-
-  // extract image data
   let img;
   try { img = roiCtx.getImageData(0,0,targetW,targetH); }
-  catch (e){ appendLog('getImageData failed: ' + e); setError('getImageData failed: ' + (e && e.message ? e.message : e)); return null; }
+  catch(e){ appendLog('getImageData failed: ' + e); setError('getImageData failed'); return null; }
   const data = img.data;
-
-  // processing pipeline adjustable
+  // pipeline
   const contrastFactor = 1.6;
   grayscaleContrast(data, contrastFactor);
-
   const sharpenAmount = Number(sharpenRange.value) || 0;
   if (sharpenAmount > 0) sharpen(data, targetW, targetH, sharpenAmount);
-
   const medianPasses = Number(medianRange.value) || 0;
   if (medianPasses > 0) medianBlur(data, targetW, targetH, medianPasses);
-
   const thresh = Number(threshRange.value) || 140;
   const whiteCount = thresholdBinary(data, thresh);
-
-  // auto invert logic: if majority is white (background white), invert to dark text on light bg as Tesseract prefers
   const whiteRatio = whiteCount / (data.length/4);
   const force = forceInvert.checked;
-  if (force){
-    invertColors(data);
-    appendLog('Force invert applied');
-  } else {
-    // heuristic: if whiteRatio > 0.8 then background mostly white -> keep; if whiteRatio < 0.5 -> invert to make dark text on light bg
-    if (whiteRatio < 0.5){
-      invertColors(data);
-      appendLog('Auto invert applied (whiteRatio=' + whiteRatio.toFixed(2) + ')');
-    } else {
-      appendLog('No invert (whiteRatio=' + whiteRatio.toFixed(2) + ')');
-    }
+  if (force){ invertColors(data); appendLog('Force invert applied'); }
+  else {
+    if (whiteRatio < 0.5){ invertColors(data); appendLog('Auto invert applied (whiteRatio=' + whiteRatio.toFixed(2) + ')'); }
+    else appendLog('No invert (whiteRatio=' + whiteRatio.toFixed(2) + ')');
   }
-
-  // put processed data back
   roiCtx.putImageData(img, 0, 0);
-
-  // show preview scaled to visual ROI
   if (showPreview){
-    try {
-      previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
-      previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
-    } catch(e){ appendLog('preview draw error: ' + e); }
-
+    try { previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height); previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height); }
+    catch(e){ appendLog('preview draw error: ' + e); }
     previewCanvas.style.display = 'block';
   }
-
-  // final sanity: check blob size
   return new Promise(resolve => {
     roiCanvas.toBlob(b => {
       if (!b){ appendLog('toBlob returned null'); resolve(null); }
-      else if (b.size < 150) { appendLog('blob too small: ' + b.size); resolve(null); }
+      else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); }
       else resolve(b);
     }, 'image/png');
   });
 }
 
-// perform OCR with current PSM and whitelist, and show diagnostics/errors live
+/* do OCR once, with diagnostics and PSM selectable */
 async function doOCROnce(){
   setError('');
   rawEl.textContent = '—'; wordsEl.textContent = '—';
-  if (!workerReady) { setError('عامل Tesseract غير جاهز'); appendLog('Worker not ready'); return; }
-  if (!videoReady) { setError('الكاميرا غير جاهزة'); appendLog('Video not ready'); return; }
+  if (!workerReady){ setError('عامل Tesseract غير جاهز'); appendLog('Worker not ready'); return null; }
+  if (!videoReady){ setError('الكاميرا غير جاهزة'); appendLog('Video not ready'); return null; }
   const blob = await prepareROIBlob();
-  if (!blob){ setError('الصورة المعالجة فارغة أو صغيرة — راجع ROI/الإضاءة/الإعدادات'); return; }
-
-  // set parameters per attempt (allow PSM change)
-  const psm = Number(psmSelect.value);
+  if (!blob){ setError('الصورة المعالجة فارغة أو صغيرة — راجع ROI/الإضاءة/الإعدادات'); return null; }
+  const psm = Number(psmSelect.value) || 7;
   try {
-    await worker.setParameters({
-      tessedit_char_whitelist: 'ECP0123456789EG',
-      tessedit_pageseg_mode: psm,
-      tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY
-    });
+    if (worker && typeof worker.setParameters === 'function'){
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ECP0123456789EG',
+        tessedit_pageseg_mode: psm,
+        tessedit_ocr_engine_mode: (OEM ? OEM.LSTM_ONLY : 1)
+      });
+    }
   } catch(e){ appendLog('setParameters error: ' + e); }
-
   appendLog('بدء recognize (PSM=' + psm + ') ...');
   try {
     const { data } = await worker.recognize(blob);
@@ -402,12 +415,10 @@ async function doOCROnce(){
       const lines = data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`);
       wordsEl.textContent = lines.join('\n');
     } else { wordsEl.textContent = '—'; }
-    appendLog('recognize done, OCR text length: ' + (data && data.text ? data.text.length : 0));
-    // cleaning and matching regex exactly as requested
+    appendLog('recognize done, text length: ' + (data && data.text ? data.text.length : 0));
     const cleaned = (data && data.text ? data.text.replace(/\s+/g,'') : '');
     const match = cleaned.match(TARGET_REGEX);
     if (match){
-      resultEl.textContent = match[0];
       appendLog('MATCH: ' + match[0]);
       return match[0];
     } else {
@@ -422,7 +433,7 @@ async function doOCROnce(){
   }
 }
 
-// repeated attempt loop with throttling and stability check
+/* repeated attempt loop */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
   scanning = true; resultEl.textContent = 'Waiting...'; setError('');
@@ -433,75 +444,50 @@ async function startLoop(){
     try {
       const res = await doOCROnce();
       if (res){
-        // stable check
         if (res === lastText) stableCount++; else { lastText = res; stableCount = 1; }
         appendLog('Stable count: ' + stableCount);
-        if (stableCount >= requiredStable){
-          resultEl.textContent = res;
-          appendLog('Finalized: ' + res);
-          scanning = false;
-          break;
-        }
-      } else {
-        lastText = null; stableCount = 0;
-      }
-    } catch(e){
-      appendLog('Loop error: ' + e);
-      // continue but allow user to see error
-      await new Promise(r=>setTimeout(r, 500));
-    }
-    await new Promise(r=>setTimeout(r, 200)); // small pause
+        if (stableCount >= requiredStable){ resultEl.textContent = res; appendLog('Finalized: ' + res); scanning = false; break; }
+      } else { lastText = null; stableCount = 0; }
+    } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r, 500)); }
+    await new Promise(r=>setTimeout(r, 200));
   }
 }
 
-// UI wiring
+/* UI wiring */
 togglePreview.addEventListener('click', () => {
   showPreview = !showPreview;
   previewCanvas.style.display = showPreview ? 'block' : 'none';
   togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
   positionROI();
 });
-
 snapBtn.addEventListener('click', async () => {
   const b = await prepareROIBlob();
   if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; }
   window.open(URL.createObjectURL(b), '_blank');
 });
-
 restartBtn.addEventListener('click', () => {
   scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError('');
   if (workerReady && videoReady) startLoop();
 });
-
 runOnceBtn.addEventListener('click', async () => {
-  try {
-    await doOCROnce();
-  } catch(e){
-    appendLog('runOnce error: ' + e);
-  }
+  try { await doOCROnce(); } catch(e){ appendLog('runOnce error: ' + e); }
 });
-
 psmSelect.addEventListener('change', () => appendLog('PSM changed to ' + psmSelect.value));
 upscaleSelect.addEventListener('change', () => appendLog('Upscale set to ' + upscaleSelect.value));
 threshRange.addEventListener('input', ()=> { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
 sharpenRange.addEventListener('input', ()=> { sharpenVal.textContent = sharpenRange.value; });
 medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange.value; });
 [rX,rY,rW,rH].forEach(el => el.addEventListener('input', () => {
-  ROI.cxPerc = Number(rX.value);
-  ROI.cyPerc = Number(rY.value);
-  ROI.wPx = Number(rW.value);
-  ROI.hPx = Number(rH.value);
-  positionROI();
+  ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI();
 }));
 
-// when video ready
+/* when video metadata ready */
 video.addEventListener('loadedmetadata', () => {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
   const maxW = Math.min(980, window.innerWidth - 40);
   video.style.width = maxW + 'px';
   video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
-  // init UI values
   rX.value = ROI.cxPerc; rY.value = ROI.cyPerc; rW.value = ROI.wPx; rH.value = ROI.hPx;
   positionROI();
   videoReady = true;
@@ -509,20 +495,15 @@ video.addEventListener('loadedmetadata', () => {
   if (workerReady) startLoop();
 });
 
-// start camera
+/* start camera and init messages */
 startCamera();
-
-// error and progress visible initially
-appendLog('Page loaded. انتظر تحضير العامل والكاميرا...');
+appendLog('الصفحة محمّلة. انتظر تهيئة العامل والكاميرا...');
 threshVal.textContent = threshRange.value;
 sharpenVal.textContent = sharpenRange.value;
 medianVal.textContent = medianRange.value;
 
-// cleanup on unload
-window.addEventListener('beforeunload', async () => {
-  try { if (worker) await worker.terminate(); }
-  catch(e){ /* ignore */ }
-});
+/* cleanup */
+window.addEventListener('beforeunload', async () => { try { if (worker && typeof worker.terminate === 'function') await worker.terminate(); } catch(e){} });
 </script>
 </body>
 </html>
