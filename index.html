@@ -2,120 +2,150 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Full Debuggable with Copy Log</title>
+  <title>OCR Tawkeel — Production + Debug</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <!-- إذا ظهرت رسالة worker.load is not a function جرّب تغيير السطر التالي إلى:
-       <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!--
+    CDN: استعمل إصدار محدد متوافق. الافتراضي هنا 2.1.5 (يدعم createWorker).
+    إن أردت نسخة أحدث غيّر هذا السطر إلى الإصدار الذي تختبره.
+    يمكنك أيضاً إزالة هذا السطر واستخدام lazy-load عبر loadTesseractIfNeeded().
   -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
-    body{font-family:Arial;direction:rtl;padding:12px;text-align:center}
-    .viewer{position:relative;display:inline-block;margin-top:8px}
+    body{font-family:Arial, system-ui; direction:rtl; padding:12px; margin:0}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    h1{font-size:18px;margin:0}
+    .viewer{position:relative;display:inline-block;margin-top:12px}
     video{border:2px solid #444;border-radius:8px;background:#000;display:block;max-width:90vw;height:auto}
     #roi-box{position:absolute;border:2px dashed #e33;box-sizing:border-box;pointer-events:none}
     #preview-canvas{position:absolute;pointer-events:none;image-rendering:pixelated;border-radius:4px;display:none;background:#fff}
-    #controls{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-    #info{margin-top:10px;text-align:left;max-width:980px;margin-left:auto;margin-right:auto}
-    .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
-    pre{background:#f7f7f7;padding:8px;border-radius:6px;overflow:auto;max-height:240px;white-space:pre-wrap}
+    #controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+    #controls button{padding:8px 10px}
+    #info{margin-top:12px;text-align:left;max-width:1100px;margin-left:auto;margin-right:auto}
+    .row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
     label{min-width:90px}
     input[type="range"]{width:160px}
+    pre{background:#f7f7f7;padding:8px;border-radius:6px;overflow:auto;max-height:220px;white-space:pre-wrap}
+    #log{height:220px}
     #result{font-weight:bold;color:green;min-height:22px}
     #errorLine{color:#b00;font-weight:bold;min-height:18px}
-    button{padding:8px 12px}
+    .small{font-size:13px;color:#666}
+    footer{margin-top:14px;font-size:12px;color:#666}
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
 <body>
-  <h2>OCR Tawkeel — صفحة تشغيل وتصحيح متقدّم</h2>
-
-  <div class="viewer" id="viewerRoot">
-    <video id="video" autoplay playsinline muted></video>
-    <div id="roi-box" aria-hidden="true"></div>
-    <canvas id="preview-canvas"></canvas>
-  </div>
-
-  <div id="controls">
-    <button id="togglePreview">عرض المعالجة</button>
-    <button id="snapBtn">فتح Snap</button>
-    <button id="restartBtn">إعادة محاولة</button>
-    <button id="runOnceBtn">جرب مرة واحدة الآن</button>
-    <button id="copyLogBtn">نسخ سجل التشغيل</button>
-  </div>
-
-  <div id="info">
-    <div class="row">
-      <div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
-      <div id="errorLine"></div>
+  <header>
+    <h1>OCR Tawkeel</h1>
+    <div>
+      <button id="toggleDebugBtn">تبديل Debug</button>
+      <button id="flushLogsBtn" style="display:none">عرض السجل</button>
     </div>
+  </header>
 
-    <div style="margin-top:8px"><strong>خيارات المعالجة وTesseract</strong></div>
-    <div class="row">
-      <label>PSM</label>
-      <select id="psmSelect">
-        <option value="7">7 - SINGLE_LINE</option>
-        <option value="6">6 - SINGLE_BLOCK</option>
-        <option value="3">3 - SINGLE_COLUMN</option>
-        <option value="11">11 - Sparse text</option>
-      </select>
-
-      <label>Upscale</label>
-      <select id="upscaleSelect">
-        <option value="1">1x</option>
-        <option value="1.5">1.5x</option>
-        <option value="2" selected>2x</option>
-        <option value="3">3x</option>
-      </select>
-
-      <label>Threshold</label>
-      <input id="threshRange" type="range" min="80" max="220" value="140">
-      <span id="threshVal">140</span>
-    </div>
-
-    <div class="row">
-      <label>Sharpen</label>
-      <input id="sharpenRange" type="range" min="0" max="3" step="0.5" value="1.0">
-      <span id="sharpenVal">1.0</span>
-
-      <label>Median blur passes</label>
-      <input id="medianRange" type="range" min="0" max="2" step="1" value="1">
-      <span id="medianVal">1</span>
-
-      <label>Force Invert</label>
-      <input id="forceInvert" type="checkbox">
-    </div>
-
-    <div style="margin-top:8px"><strong>ROI Tune</strong> <small style="color:#666">حرك المربعات حتى يظهر السطر داخل الإطار الأحمر</small></div>
-    <div class="row">
-      <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
-      <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
-      <label>Width px</label><input id="rW" type="range" min="60" max="900" value="260">
-      <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
-    </div>
-
-    <div style="margin-top:10px"><strong>مخرجات تشخيصية</strong></div>
-    <div class="row">
-      <div style="flex:1">
-        <div><strong>Raw OCR</strong></div>
-        <pre id="raw">—</pre>
+  <main style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center">
+    <section style="min-width:320px">
+      <div class="viewer" id="viewerRoot">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="roi-box" aria-hidden="true"></div>
+        <canvas id="preview-canvas"></canvas>
       </div>
-      <div style="flex:1">
-        <div><strong>Words (text : confidence)</strong></div>
-        <pre id="words">—</pre>
-      </div>
-    </div>
 
-    <div style="margin-top:10px"><strong>سجل التشغيل (رسائل الأخطاء والتقدم)</strong></div>
-    <pre id="log">جاري التهيئة...</pre>
-  </div>
+      <div id="controls" style="margin-top:10px">
+        <button id="togglePreview">عرض المعالجة</button>
+        <button id="snapBtn">فتح Snap</button>
+        <button id="runOnceBtn">جرب مرة واحدة الآن</button>
+        <button id="restartBtn">إعادة محاولة</button>
+        <button id="copyLogBtn">نسخ سجل التشغيل</button>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
+        <div id="errorLine"></div>
+      </div>
+
+      <div style="margin-top:8px" class="small">تحكم ROI وجرب إعدادات المعالجة لتلائم ظروف الإضاءة والخط</div>
+      <div class="row" style="margin-top:6px">
+        <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
+        <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
+      </div>
+      <div class="row">
+        <label>Width px</label><input id="rW" type="range" min="60" max="900" value="260">
+        <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
+      </div>
+    </section>
+
+    <aside style="min-width:420px;max-width:720px">
+      <div style="border:1px solid #eee;padding:10px;border-radius:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>خيارات المعالجة وTesseract</strong>
+          <span class="small">Debug: <span id="dbgBadge">off</span></span>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <label>PSM</label>
+          <select id="psmSelect">
+            <option value="7">7 - SINGLE_LINE</option>
+            <option value="6">6 - SINGLE_BLOCK</option>
+            <option value="3">3 - SINGLE_COLUMN</option>
+            <option value="11">11 - Sparse text</option>
+          </select>
+
+          <label>Upscale</label>
+          <select id="upscaleSelect">
+            <option value="1">1x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2" selected>2x</option>
+            <option value="3">3x</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Threshold</label>
+          <input id="threshRange" type="range" min="80" max="220" value="140"><span id="threshVal">140</span>
+          <label>Sharpen</label>
+          <input id="sharpenRange" type="range" min="0" max="3" step="0.5" value="1.0"><span id="sharpenVal">1.0</span>
+        </div>
+
+        <div class="row">
+          <label>Median</label>
+          <input id="medianRange" type="range" min="0" max="2" step="1" value="1"><span id="medianVal">1</span>
+          <label>Force Invert</label><input id="forceInvert" type="checkbox">
+        </div>
+      </div>
+
+      <div style="margin-top:10px;border:1px solid #eee;padding:10px;border-radius:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>مخرجات تشخيصية</strong>
+          <button id="clearLogBtn" style="font-size:12px">مسح</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <div style="flex:1">
+            <div><strong>Raw OCR</strong></div>
+            <pre id="raw">—</pre>
+          </div>
+          <div style="flex:1">
+            <div><strong>Words (text : confidence)</strong></div>
+            <pre id="words">—</pre>
+          </div>
+        </div>
+        <div style="margin-top:10px"><strong>سجل التشغيل</strong></div>
+        <pre id="log">جاري التهيئة...</pre>
+      </div>
+
+      <footer class="small" style="margin-top:8px">
+        ملاحظة: في بيئة production تأكد من تحميل Tesseract من CDN محدد بالإصدار، تفعيل HTTPS، وضبط CSP ورفع sourcemaps عند الحاجة.
+      </footer>
+    </aside>
+  </main>
 
   <canvas id="fullCanvas" style="display:none"></canvas>
   <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* ثابت: لا تغيّر */
+/* ------- ثابت التعرف (لا تغيره إذا لم تكن تعرف سبب التغيير) ------- */
 const TARGET_REGEX = /ECP\d{8}EG/;
 
+/* عناصر DOM */
 const video = document.getElementById('video');
 const viewerRoot = document.getElementById('viewerRoot');
 const roiBox = document.getElementById('roi-box');
@@ -131,12 +161,16 @@ const rawEl = document.getElementById('raw');
 const wordsEl = document.getElementById('words');
 const logEl = document.getElementById('log');
 const errorLine = document.getElementById('errorLine');
+const dbgBadge = document.getElementById('dbgBadge');
 
 const togglePreview = document.getElementById('togglePreview');
 const snapBtn = document.getElementById('snapBtn');
-const restartBtn = document.getElementById('restartBtn');
 const runOnceBtn = document.getElementById('runOnceBtn');
+const restartBtn = document.getElementById('restartBtn');
 const copyLogBtn = document.getElementById('copyLogBtn');
+const clearLogBtn = document.getElementById('clearLogBtn');
+const toggleDebugBtn = document.getElementById('toggleDebugBtn');
+const flushLogsBtn = document.getElementById('flushLogsBtn');
 
 const psmSelect = document.getElementById('psmSelect');
 const upscaleSelect = document.getElementById('upscaleSelect');
@@ -150,6 +184,7 @@ const forceInvert = document.getElementById('forceInvert');
 
 const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW = document.getElementById('rW'), rH = document.getElementById('rH');
 
+/* حالات وتهيئة */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null, createWorkerFn = null;
@@ -157,79 +192,144 @@ let scanning = true, ocrRunning = false;
 let lastAttempt = 0, lastText = null, stableCount = 0;
 const minInterval = 400, requiredStable = 2;
 
+/* Debug flag sources: query param ?debug=1 or localStorage */
+const urlParams = new URLSearchParams(location.search);
+const DEBUG_QP = urlParams.get('debug') === '1';
+const DEBUG_LS = localStorage.getItem('ocr_debug') === '1';
+let DEBUG = Boolean(DEBUG_QP || DEBUG_LS);
+dbgBadge.textContent = DEBUG ? 'on' : 'off';
+flushLogsBtn.style.display = DEBUG ? 'inline-block' : 'none';
+
+/* log buffer - always collect, only render UI in debug mode */
+const LOG_BUFFER = [];
 function appendLog(line){
   const t = new Date().toLocaleTimeString();
-  logEl.textContent = `[${t}] ${line}\n` + logEl.textContent;
+  const entry = `[${t}] ${line}`;
+  LOG_BUFFER.unshift(entry);
+  // cap buffer
+  if (LOG_BUFFER.length > 1000) LOG_BUFFER.pop();
+  if (DEBUG) {
+    logEl.textContent = LOG_BUFFER.join('\n');
+  }
+  // always show errors in console for ops visibility
+  if (/error/i.test(line)) console.error(entry);
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
 
+/* safe console wrapper */
+const _console = {
+  log: (...args) => { if (DEBUG) console.log(...args); },
+  warn: (...args) => { if (DEBUG) console.warn(...args); },
+  error: (...args) => { console.error(...args); }
+};
+
 /* start camera */
-function startCamera(){
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width:{ ideal:1280 }, height:{ ideal:720 } } })
-    .then(s => { video.srcObject = s; appendLog('Camera stream started'); })
-    .catch(e => { appendLog('Camera error: ' + (e && e.message ? e.message : e)); setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e)); });
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width:{ ideal:1280 }, height:{ ideal:720 } } });
+    video.srcObject = stream;
+    appendLog('Camera stream started');
+  } catch (e) {
+    appendLog('Camera error: ' + (e && e.message ? e.message : e));
+    setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e));
+  }
 }
 
-/* Compat initWorker */
-(async function initWorker(){
-  appendLog('بدء تهيئة Tesseract (توافقي)...');
+/* lazy-load tesseract if needed (production-friendly) */
+async function loadTesseractIfNeeded(){
+  if (window.Tesseract) return window.Tesseract;
+  appendLog('Lazy-loading Tesseract.js');
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    // here you can set the exact version you want in production
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => { appendLog('Tesseract script loaded'); resolve(window.Tesseract); };
+    s.onerror = (e) => { appendLog('Failed to load Tesseract script'); reject(e); };
+    document.head.appendChild(s);
+  });
+}
+
+/* initWorker with compatibility and robust guards */
+async function initWorker(){
+  appendLog('Initializing Tesseract worker (compat mode)...');
+  try {
+    await loadTesseractIfNeeded();
+  } catch(e){
+    appendLog('Failed loading tesseract: ' + e);
+    setError('فشل تحميل مكتبة Tesseract');
+    return;
+  }
 
   try {
     if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
       createWorkerFn = Tesseract.createWorker;
-      appendLog('استخدمنا Tesseract.createWorker');
+      appendLog('Using Tesseract.createWorker');
     } else if (typeof Tesseract !== 'undefined' && Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
       createWorkerFn = Tesseract.default.createWorker;
-      appendLog('استخدمنا Tesseract.default.createWorker');
+      appendLog('Using Tesseract.default.createWorker');
     } else {
-      appendLog('createWorker غير متاح — سنحاول fallback باستخدام Tesseract.recognize إن أمكن');
+      appendLog('createWorker not present; will use fallback recognize if available');
     }
 
     if (createWorkerFn) {
-      worker = createWorkerFn({ logger: m => appendLog('Tesseract: ' + (m.status||'') + ' ' + (m.progress ? (m.progress*100).toFixed(1)+'%' : '')) });
-      if (!worker || typeof worker.load !== 'function') {
-        throw new Error('الـ worker المنشأ لا يملك دالة load (واجهة غير متوقعة)');
-      }
+      worker = createWorkerFn({ logger: m => appendLog('Tesseract: ' + (m.status || '') + ' ' + (m.progress ? (m.progress*100).toFixed(1)+'%' : '')) });
+      if (!worker || typeof worker.load !== 'function') throw new Error('Worker does not expose load()');
       await worker.load(); appendLog('worker.load OK');
       await worker.loadLanguage('eng'); appendLog('language loaded: eng');
       await worker.initialize('eng'); appendLog('worker initialized');
       if (typeof worker.setParameters === 'function') {
-        try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG' }); } catch(e){ appendLog('setParameters initial failed: ' + e); }
+        try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG' }); } catch(e){ appendLog('initial setParameters failed: ' + e); }
       }
       workerReady = true; appendLog('Worker ready (createWorker)');
       if (videoReady) startLoop();
       return;
     }
 
+    // fallback: Tesseract.recognize
     if (typeof Tesseract !== 'undefined' && typeof Tesseract.recognize === 'function') {
-      appendLog('Fallback: Tesseract.recognize موجود، نستخدمه');
+      appendLog('Fallback: using Tesseract.recognize');
       worker = {
-        recognize: async (blob, opts = {}) => {
-          if (!blob) throw new Error('recognize: blob is null');
+        recognize: async (blob, opts={}) => {
+          if (!blob) throw new Error('recognize: blob null');
           const tmpUrl = URL.createObjectURL(blob);
           try {
             const res = await Tesseract.recognize(tmpUrl, 'eng', opts);
             return res;
           } finally { URL.revokeObjectURL(tmpUrl); }
         },
-        setParameters: async ()=>{},
-        terminate: async ()=>{}
+        setParameters: async () => {},
+        terminate: async () => {}
       };
       workerReady = true; appendLog('Worker ready (fallback recognize)');
       if (videoReady) startLoop();
       return;
     }
 
-    appendLog('لم نجد واجهة Tesseract مناسبة. استخدم CDN متوافق إن لزم.');
-    setError('لم يتم تحميل واجهة Tesseract المناسبة. جرّب CDN ثابت مثل tesseract.js@2.1.5');
-  } catch (err) {
-    appendLog('initWorker failed: ' + (err && err.message ? err.message : err));
-    setError('initWorker failed: ' + (err && err.message ? err.message : err));
+    appendLog('No suitable Tesseract interface found in this environment');
+    setError('لم يتم تحميل واجهة Tesseract المناسبة. استخدم CDN متوافق.');
+  } catch(err){
+    appendLog('initWorker error: ' + (err && err.message ? err.message : err));
+    setError('خطأ بتهيئة العامل: ' + (err && err.message ? err.message : err));
     worker = null;
   }
-})();
+}
 
-/* ROI positioning */
+/* image processing helpers */
+function grayscaleContrast(data, contrastFactor){
+  const intercept = 128 * (1 - contrastFactor);
+  for (let i=0;i<data.length;i+=4){
+    const g = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+    let v = g * contrastFactor + intercept;
+    data[i]=data[i+1]=data[i+2]=v;
+  }
+}
+function sharpen(data,w,h,amount){ if (!amount||amount<=0) return; const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const idx=(y*w+x)*4; const center=copy[idx]; const up=copy[((y-1)*w+x)*4]; const down=copy[((y+1)*w+x)*4]; const left=copy[(y*w+(x-1))*4]; const right=copy[(y*w+(x+1))*4]; let v=(1+amount*4)*center - amount*(up+down+left+right); v=Math.max(0,Math.min(255,v)); data[idx]=data[idx+1]=data[idx+2]=v; } } }
+function medianBlur(data,w,h,passes){ if (!passes||passes<=0) return; for (let p=0;p<passes;p++){ const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const vals=[]; for (let yy=-1;yy<=1;yy++){ for (let xx=-1;xx<=1;xx++){ const id=((y+yy)*w + (x+xx))*4; vals.push(copy[id]); } } vals.sort((a,b)=>a-b); const med=vals[4]; const idc=(y*w + x)*4; data[idc]=data[idc+1]=data[idc+2]=med; } } } }
+function thresholdBinary(data,t){ let whiteCount=0; for (let i=0;i<data.length;i+=4){ const v = data[i] > t ? 255:0; data[i]=data[i+1]=data[i+2]=v; if (v===255) whiteCount++; } return whiteCount; }
+function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
+
+/* ROI helpers */
 function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -263,25 +363,11 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-/* image processing helpers */
-function grayscaleContrast(data, contrastFactor){
-  const intercept = 128 * (1 - contrastFactor);
-  for (let i=0;i<data.length;i+=4){
-    const g = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
-    let v = g * contrastFactor + intercept;
-    data[i]=data[i+1]=data[i+2]=v;
-  }
-}
-function sharpen(data,w,h,amount){ if (!amount||amount<=0) return; const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const idx=(y*w+x)*4; const center=copy[idx]; const up=copy[((y-1)*w+x)*4]; const down=copy[((y+1)*w+x)*4]; const left=copy[(y*w+(x-1))*4]; const right=copy[(y*w+(x+1))*4]; let v=(1+amount*4)*center - amount*(up+down+left+right); v=Math.max(0,Math.min(255,v)); data[idx]=data[idx+1]=data[idx+2]=v; } } }
-function medianBlur(data,w,h,passes){ if (!passes||passes<=0) return; for (let p=0;p<passes;p++){ const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const vals=[]; for (let yy=-1;yy<=1;yy++){ for (let xx=-1;xx<=1;xx++){ const id = ((y+yy)*w + (x+xx))*4; vals.push(copy[id]); } } vals.sort((a,b)=>a-b); const med=vals[4]; const idc=(y*w + x)*4; data[idc]=data[idc+1]=data[idc+2]=med; } } } }
-function thresholdBinary(data,t){ let whiteCount=0; for (let i=0;i<data.length;i+=4){ const v = data[i] > t ? 255:0; data[i]=data[i+1]=data[i+2]=v; if (v===255) whiteCount++; } return whiteCount; }
-function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
-
-/* prepare ROI blob */
+/* prepare blob */
 async function prepareROIBlob(){
   try { fullCtx.drawImage(video,0,0,fullCanvas.width,fullCanvas.height); } catch(e){ appendLog('drawImage error: ' + e); setError('خطأ رسم الفريم'); return null; }
   const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
-  if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الفيديو'); setError('ROI غير داخل إطار الفيديو'); return null; }
+  if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الفيديو'); setError('ROI خارج إطار الفيديو'); return null; }
   const factor = Number(upscaleSelect.value) || 2;
   const targetW = Math.max(120, Math.round(dstW * factor));
   const targetH = Math.max(24, Math.round(dstH * factor));
@@ -291,8 +377,7 @@ async function prepareROIBlob(){
   const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
   const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
   roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
-  let img;
-  try { img = roiCtx.getImageData(0,0,targetW,targetH); } catch(e){ appendLog('getImageData failed: ' + e); setError('getImageData failed'); return null; }
+  let img; try { img = roiCtx.getImageData(0,0,targetW,targetH); } catch(e){ appendLog('getImageData failed: ' + e); setError('getImageData failed'); return null; }
   const data = img.data;
   const contrastFactor = 1.6; grayscaleContrast(data, contrastFactor);
   const sharpenAmount = Number(sharpenRange.value) || 0; if (sharpenAmount>0) sharpen(data,targetW,targetH,sharpenAmount);
@@ -307,14 +392,14 @@ async function prepareROIBlob(){
   return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* safe recognize helpers to avoid .endsWith errors */
+/* safe recognize wrapper handling createWorker vs fallback and .endsWith issues */
 async function attemptRecognizeWithBlob(blob, opts){
   try {
     const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
     return res;
   } catch (e){
     const msg = (e && e.message) ? e.message.toLowerCase() : '';
-    if (msg.includes('endwith') || msg.includes('endswith') || msg.includes('is not a function') || msg.includes('undefined')) {
+    if (msg.includes('endwith') || msg.includes('endswith') || msg.includes('is not a function') || msg.includes('undefined')){
       appendLog('Direct blob recognize failed: ' + (e && e.message ? e.message : e));
       return null;
     }
@@ -322,13 +407,13 @@ async function attemptRecognizeWithBlob(blob, opts){
   }
 }
 async function safeRecognize(blob, opts){
-  if (!blob) throw new Error('safeRecognize: blob is null');
-  if (!worker) throw new Error('safeRecognize: worker is null');
-  if (typeof worker.recognize !== 'function') throw new Error('safeRecognize: worker.recognize is not a function');
-  // try blob direct
+  if (!blob) throw new Error('safeRecognize: blob null');
+  if (!worker) throw new Error('safeRecognize: worker null');
+  if (typeof worker.recognize !== 'function') throw new Error('safeRecognize: worker.recognize missing');
+  // try blob directly
   const tryDirect = await attemptRecognizeWithBlob(blob, opts).catch(e => { appendLog('attemptRecognizeWithBlob threw: ' + e); return null; });
   if (tryDirect) return tryDirect;
-  // fallback to URL
+  // fallback via URL
   const url = URL.createObjectURL(blob);
   try {
     const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
@@ -364,7 +449,7 @@ async function doOCROnce(){
   } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
-/* loop */
+/* main loop */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
   scanning = true; resultEl.textContent = 'Waiting...'; setError('');
@@ -385,57 +470,49 @@ async function startLoop(){
 }
 
 /* UI wiring */
-togglePreview.addEventListener('click', () => {
-  showPreview = !showPreview;
-  previewCanvas.style.display = showPreview ? 'block' : 'none';
-  togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
-  positionROI();
-});
-
-snapBtn.addEventListener('click', async () => {
-  const b = await prepareROIBlob();
-  if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; }
-  window.open(URL.createObjectURL(b), '_blank');
-});
-
-restartBtn.addEventListener('click', () => {
-  scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError('');
-  if (workerReady && videoReady) startLoop();
-});
-
-runOnceBtn.addEventListener('click', async () => {
-  try { await doOCROnce(); } catch(e){ appendLog('runOnce error: ' + e); }
-});
+togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
+snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
+runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
+restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
 
 copyLogBtn.addEventListener('click', async () => {
   try {
-    const text = logEl.textContent || '';
+    const text = LOG_BUFFER.join('\n') || '';
     if (!text) { appendLog('لا يوجد شيء لنسخه من السجل'); return; }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
       appendLog('تم نسخ سجل التشغيل إلى الحافظة');
-      copyLogBtn.textContent = 'تم النسخ';
-      setTimeout(() => { copyLogBtn.textContent = 'نسخ سجل التشغيل'; }, 1500);
+      copyLogBtn.textContent = 'تم النسخ'; setTimeout(()=>copyLogBtn.textContent='نسخ سجل التشغيل',1500);
       return;
     }
-    const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.focus(); ta.select();
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.select();
     const ok = document.execCommand('copy'); document.body.removeChild(ta);
-    if (ok) { appendLog('تم نسخ سجل التشغيل (fallback)'); copyLogBtn.textContent = 'تم النسخ'; setTimeout(()=>{copyLogBtn.textContent='نسخ سجل التشغيل'},1500); }
-    else { appendLog('فشل النسخ عبر fallback'); setError('فشل النسخ — انسخ يدوياً'); }
+    if (ok) { appendLog('تم نسخ سجل التشغيل (fallback)'); copyLogBtn.textContent='تم النسخ'; setTimeout(()=>copyLogBtn.textContent='نسخ سجل التشغيل',1500); }
+    else { appendLog('فشل النسخ'); setError('فشل النسخ — انسخ يدوياً'); }
   } catch(err){ appendLog('خطأ أثناء النسخ: ' + (err && err.message ? err.message : err)); setError('خطأ أثناء النسخ'); }
 });
 
-psmSelect.addEventListener('change', () => appendLog('PSM changed to ' + psmSelect.value));
-upscaleSelect.addEventListener('change', () => appendLog('Upscale set to ' + upscaleSelect.value));
-threshRange.addEventListener('input', () => { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
-sharpenRange.addEventListener('input', () => { sharpenVal.textContent = sharpenRange.value; });
-medianRange.addEventListener('input', () => { medianVal.textContent = medianRange.value; });
-[rX,rY,rW,rH].forEach(el => el.addEventListener('input', () => {
-  ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI();
-}));
+clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG) logEl.textContent=''; appendLog('log cleared'); });
 
-/* video metadata */
-video.addEventListener('loadedmetadata', () => {
+toggleDebugBtn.addEventListener('click', ()=> {
+  DEBUG = !DEBUG;
+  if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
+  dbgBadge.textContent = DEBUG ? 'on' : 'off';
+  appendLog('Debug toggled to ' + (DEBUG ? 'on' : 'off'));
+  if (DEBUG) logEl.textContent = LOG_BUFFER.join('\n'); else logEl.textContent = '';
+  flushLogsBtn.style.display = DEBUG ? 'inline-block' : 'none';
+});
+
+/* UI controls binding */
+psmSelect.addEventListener('change', ()=> appendLog('PSM changed to ' + psmSelect.value));
+upscaleSelect.addEventListener('change', ()=> appendLog('Upscale set to ' + upscaleSelect.value));
+threshRange.addEventListener('input', ()=> { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
+sharpenRange.addEventListener('input', ()=> { sharpenVal.textContent = sharpenRange.value; });
+medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange.value; });
+[rX,rY,rW,rH].forEach(el => el.addEventListener('input', ()=>{ ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI(); }));
+
+/* video metadata & start */
+video.addEventListener('loadedmetadata', ()=> {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
   const maxW = Math.min(980, window.innerWidth - 40);
@@ -445,18 +522,21 @@ video.addEventListener('loadedmetadata', () => {
   positionROI();
   videoReady = true;
   appendLog('Video ready (metadata)');
+  // initialize worker after video ready optionally
+  if (!workerReady) initWorker();
+  // if both ready, start loop
   if (workerReady) startLoop();
 });
 
-/* start camera & initial logs */
+/* init: start camera and worker (lazy init done inside initWorker) */
 startCamera();
-appendLog('الصفحة محمّلة. انتظر تهيئة العامل والكاميرا...');
-threshVal.textContent = threshRange.value;
-sharpenVal.textContent = sharpenRange.value;
-medianVal.textContent = medianRange.value;
+appendLog('Page loaded; debug=' + (DEBUG ? 'on' : 'off'));
+if (!workerReady) initWorker();
 
 /* cleanup */
-window.addEventListener('beforeunload', async () => { try { if (worker && typeof worker.terminate === 'function') await worker.terminate(); } catch(e){} });
+window.addEventListener('beforeunload', async () => {
+  try { if (worker && typeof worker.terminate === 'function') await worker.terminate(); } catch(e){}
+});
 </script>
 </body>
 </html>
