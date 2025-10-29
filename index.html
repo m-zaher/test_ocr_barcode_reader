@@ -16,12 +16,8 @@
     #preview-canvas{position:absolute;pointer-events:none;image-rendering:pixelated;border-radius:4px;display:none;background:#fff}
     #controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
     #controls button{padding:8px 10px}
-    #info{margin-top:12px;text-align:left;max-width:1100px;margin-left:auto;margin-right:auto}
     .row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
-    label{min-width:90px}
-    input[type="range"]{width:160px}
     pre{background:var(--panel);padding:8px;border-radius:6px;overflow:auto;max-height:220px;white-space:pre-wrap}
-    #log{height:220px}
     #barcodeLabel{font-weight:bold;color:green;min-height:22px}
     #idLabel{font-weight:bold;color:#0a57a4;min-height:22px}
     #errorLine{color:#b00;font-weight:bold;min-height:18px}
@@ -50,16 +46,16 @@
       </div>
 
       <div id="controls" style="margin-top:10px">
-        <!-- These action buttons are debug-only per request -->
+        <!-- Debug-only action buttons -->
         <button id="togglePreview" class="debugOnly">عرض المعالجة</button>
         <button id="snapBtn" class="debugOnly">فتح Snap</button>
         <button id="runOnceBtn" class="debugOnly">جرب مرة واحدة الآن</button>
 
-        <!-- Retry button (visible always), renamed to "بجديد" and fixed behavior -->
-        <button id="restartBtn">بجديد</button>
+        <!-- زر إعادة التهيئة الكامل مسمى "جديد" -->
+        <button id="resetAllBtn">جديد</button>
 
         <!-- copy log visible only in debug -->
-        <button id="copyLogBtn" class="hidden debugOnly">نسخ سجل التشغيل</button>
+        <button id="copyLogBtn" class="debugOnly hidden">نسخ سجل التشغيل</button>
       </div>
 
       <div class="row" style="margin-top:10px">
@@ -68,9 +64,9 @@
         <div id="errorLine"></div>
       </div>
 
-      <div style="margin-top:8px" class="small">ضع السطر/الهوية داخل الإطار الأحمر ثم اضغط "بجديد" لإعادة المحاولة أو فعّل Debug لرؤية أدوات المعالجة</div>
+      <div style="margin-top:8px" class="small">ضع السطر/الهوية داخل الإطار الأحمر ثم اضغط "جديد" لإعادة التهيئة الكاملة أو فعّل Debug لرؤية أدوات المعالجة</div>
 
-      <div style="margin-top:10px" id="roiControls" class="hidden debugOnly">
+      <div style="margin-top:10px" id="roiControls" class="debugOnly hidden">
         <div class="row">
           <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
           <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
@@ -149,10 +145,7 @@
 
 <script>
 /* ---------- تعاريف ---------- */
-/* Barcode: ECP\d{8}EG */
 const BARCODE_REGEX = /ECP\d{8}EG/;
-
-/* National ID regex */
 const ID_REGEX = new RegExp('^[23](0[0-9]|[0-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])(01|02|03|04|05|06|11|12|13|14|15|16|17|18|19|21|22|23|24|25|26|27|28|29|31|32|33|34|35|88)[0-9]{5}$');
 
 /* DOM */
@@ -176,7 +169,7 @@ const errorLine = document.getElementById('errorLine');
 const togglePreview = document.getElementById('togglePreview');
 const snapBtn = document.getElementById('snapBtn');
 const runOnceBtn = document.getElementById('runOnceBtn');
-const restartBtn = document.getElementById('restartBtn');
+const resetAllBtn = document.getElementById('resetAllBtn');
 const copyLogBtn = document.getElementById('copyLogBtn');
 const clearLogBtn = document.getElementById('clearLogBtn');
 const toggleDebugBtn = document.getElementById('toggleDebugBtn');
@@ -197,7 +190,7 @@ const settingsPanel = document.getElementById('settingsPanel');
 const roiControls = document.getElementById('roiControls');
 const debugDiagnostics = document.getElementById('debugDiagnostics');
 
-/* ---------- حالات وعدادات الاستقرار (محدثة لاستمرار البحث) ---------- */
+/* ---------- حالات وعدادات الاستقرار ---------- */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null;
@@ -207,17 +200,14 @@ let lastAttempt = 0;
 const minInterval = 400;
 const requiredStable = 2;
 
-/* حالات النتائج المؤكدة */
 let foundBarcode = null;
 let foundID = null;
 
-/* عدادات مرشحي الاستقرار لكل هدف */
 let lastBarcodeCandidate = null;
 let stableBarcodeCount = 0;
 let lastIDCandidate = null;
 let stableIDCount = 0;
 
-/* حماية ضد حلقات لا نهائية */
 const MAX_ATTEMPTS = 2000;
 let attemptsCount = 0;
 
@@ -255,10 +245,8 @@ function appendLog(line){
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
 
-/* ---------- ضبط لون مربع ROI افتراضيا أحمر ---------- */
-(function applyROIColor(){
-  roiBox.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#e33';
-})();
+/* ensure ROI border red (CSS var --accent already red) */
+(function applyROIColor(){ roiBox.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#e33'; })();
 
 /* ---------- كاميرا ---------- */
 async function startCamera(){
@@ -413,7 +401,7 @@ async function prepareROIBlob(){
   return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* ---------- استدعاء recognize بأمان ---------- */
+/* ---------- recognize safety ---------- */
 async function attemptRecognizeWithBlob(blob, opts){
   try {
     const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
@@ -437,7 +425,7 @@ async function safeRecognize(blob, opts){
   try { const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {}); return res; } finally { URL.revokeObjectURL(url); }
 }
 
-/* ---------- استخراج الباركود والهوية من النص ---------- */
+/* ---------- استخراج ---------- */
 function extractBarcodeAndID(text){
   const cleaned = (text || '').replace(/\s+/g, '');
   const barcodeMatch = cleaned.match(BARCODE_REGEX);
@@ -484,7 +472,7 @@ async function doOCROnce(){
   } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
-/* ---------- حلقة البحث المستمر (تتواصل حتى تؤكد كلا القيمتين أو تتوقف يدوياً) ---------- */
+/* ---------- حلقة المسح ---------- */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
   scanning = true;
@@ -505,7 +493,6 @@ async function startLoop(){
         stableBarcodeCount = 0;
         stableIDCount = 0;
       } else {
-        // barcode handling
         if (res.barcode){
           if (res.barcode === lastBarcodeCandidate) stableBarcodeCount++; else { lastBarcodeCandidate = res.barcode; stableBarcodeCount = 1; }
           appendLog('Barcode candidate: ' + res.barcode + ' (stable=' + stableBarcodeCount + ')');
@@ -519,7 +506,6 @@ async function startLoop(){
           stableBarcodeCount = 0;
         }
 
-        // ID handling
         if (res.id){
           if (res.id === lastIDCandidate) stableIDCount++; else { lastIDCandidate = res.id; stableIDCount = 1; }
           appendLog('ID candidate: ' + res.id + ' (stable=' + stableIDCount + ')');
@@ -534,7 +520,6 @@ async function startLoop(){
         }
       }
 
-      // end conditions
       if (foundBarcode && foundID){
         appendLog('Both barcode and ID confirmed. Stopping automatic loop.');
         scanning = false;
@@ -555,26 +540,31 @@ async function startLoop(){
   }
 }
 
-/* ---------- UI wiring ---------- */
-/* toggle preview only visible in debug; button exists but hidden unless debug */
-togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
-
-snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
-
-runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
-
-/* Restart ("بجديد") behavior: reset candidates for missing targets and (re)start loop.
-   This fixes previous issue where loop stopped after confirming only one value. */
-restartBtn.addEventListener('click', ()=> {
-  // reset candidates for the values that are not yet confirmed
-  if (!foundBarcode) { lastBarcodeCandidate = null; stableBarcodeCount = 0; }
-  if (!foundID) { lastIDCandidate = null; stableIDCount = 0; }
+/* ---------- زر "جديد" : إعادة التهيئة الكامل ---------- */
+resetAllBtn.addEventListener('click', ()=> {
+  appendLog('Full reset requested via "جديد". Clearing all state to defaults.');
+  // إيقاف الحلقة الحالية
+  scanning = false;
+  // مسح القيم المؤكدة والمرشحين والعدادات
+  foundBarcode = null; foundID = null;
+  lastBarcodeCandidate = null; stableBarcodeCount = 0;
+  lastIDCandidate = null; stableIDCount = 0;
   attemptsCount = 0;
-  scanning = true;
+  // إعادة عرض واجهة افتراضية
+  barcodeLabel.textContent = 'Waiting...';
+  idLabel.textContent = 'Waiting...';
   setError('');
-  appendLog('Manual retry (بجديد) triggered. Keeping confirmed results if any.');
-  if (workerReady && videoReady) startLoop();
+  // إعادة تهيئة ROI إلى الافتراضيات (اختياري، نعيدها هنا)
+  ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
+  positionROI();
+  // أعد تشغيل الحلقة بعد قصيدة قصيرة لتفادي سباق حالة
+  setTimeout(()=>{ scanning = true; if (workerReady && videoReady) startLoop(); }, 150);
 });
+
+/* ---------- أزرار Debug الأخرى ---------- */
+togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
+snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
+runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
 
 /* copy log */
 copyLogBtn.addEventListener('click', async () => {
