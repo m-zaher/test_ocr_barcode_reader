@@ -2,54 +2,56 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Debugged</title>
+  <title>OCR Tawkeel — Reliable Preview</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; text-align:center; padding:12px; }
     .viewer { position:relative; display:inline-block; }
-    video { border:2px solid #444; border-radius:8px; background:#000; object-fit:cover; width:640px; height:480px; }
-    #roi-box { position:absolute; width:250px; height:60px; border:2px dashed red; left:50%; transform:translateX(-50%); top:320px; box-sizing:border-box; pointer-events:none; }
-    #preview { position:absolute; left:50%; transform:translateX(-50%); top:320px; width:250px; height:60px; pointer-events:none; display:none; image-rendering:pixelated; border-radius:4px; }
+    video { border:2px solid #444; border-radius:8px; background:#000; display:block; max-width:90vw; height:auto; }
+    #roi-box { position:absolute; width:260px; height:60px; border:2px dashed red; left:50%; transform:translateX(-50%); top:72%; box-sizing:border-box; pointer-events:none; }
+    #preview-canvas { position:absolute; left:0; top:0; pointer-events:none; image-rendering:pixelated; display:none; border-radius:4px; box-shadow: 0 0 6px rgba(0,0,0,0.2); }
     #controls { margin-top:12px; }
     #result { font-weight:bold; color:green; min-height:26px; margin-top:10px; }
+    #log { font-size:12px; color:#666; margin-top:8px; min-height:18px; }
     button { padding:8px 12px; margin:0 6px; }
-    @media (max-width:700px) { video{width:360px;height:270px;} #roi-box,#preview{width:200px;height:48px;top:200px;} }
-    #log { font-size:12px;color:#888; margin-top:8px; min-height:18px; }
   </style>
 </head>
 <body>
-  <h3>OCR Tawkeel — Debugged</h3>
+  <h3>OCR Tawkeel — Reliable Preview</h3>
 
-  <div class="viewer" id="viewer">
+  <div id="viewerRoot" class="viewer">
     <video id="video" autoplay playsinline muted></video>
     <div id="roi-box" aria-hidden="true"></div>
-    <canvas id="preview" width="250" height="60"></canvas>
+    <canvas id="preview-canvas"></canvas>
   </div>
 
   <div id="controls">
-    <button id="toggleBtn">عرض المعالجة</button>
+    <button id="togglePreview">عرض المعالجة</button>
+    <button id="snapBtn">اختبار التقاط ROI</button>
     <button id="restartBtn">🔄 إعادة المحاولة</button>
   </div>
 
   <div id="result">Waiting...</div>
   <div id="log"></div>
 
-  <!-- خلفية معالجة مخفية -->
-  <canvas id="fullCanvas" width="640" height="480" style="display:none"></canvas>
+  <!-- كانڤاسات معالجة مخفية -->
+  <canvas id="fullCanvas" style="display:none"></canvas>
   <canvas id="roiCanvas" width="360" height="80" style="display:none"></canvas>
 
 <script>
-/* إعدادات ثابتة — لا تغيّر الريجيكس */
+/* لا تغيير للريجيكس */
 const TARGET_REGEX = /ECP\d{8}EG/;
 
 const video = document.getElementById('video');
-const preview = document.getElementById('preview');
-const previewCtx = preview.getContext('2d');
+const viewerRoot = document.getElementById('viewerRoot');
 const roiBox = document.getElementById('roi-box');
+const previewCanvas = document.getElementById('preview-canvas');
+const previewCtx = previewCanvas.getContext('2d');
 const resultBox = document.getElementById('result');
 const logBox = document.getElementById('log');
-const toggleBtn = document.getElementById('toggleBtn');
+const toggleBtn = document.getElementById('togglePreview');
+const snapBtn = document.getElementById('snapBtn');
 const restartBtn = document.getElementById('restartBtn');
 
 const fullCanvas = document.getElementById('fullCanvas');
@@ -57,64 +59,62 @@ const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
 const roiCanvas = document.getElementById('roiCanvas');
 const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
-// ROI كنسب مئوية تُحوَّل لاحقاً لبكسل
-const ROI_RATIO = { x: 200/640, y: 320/480, w: 250/640, h: 60/480 };
-let roiPx = { x:0,y:0,w:0,h:0 };
-
-// حالات التشغيل
+// إعدادات تشغيل
 let showPreview = false;
-let scanning = true;
-let ocrRunning = false;
 let videoReady = false;
 let workerReady = false;
 let worker = null;
+let scanning = true;
+let ocrRunning = false;
 let lastAttempt = 0;
 const minInterval = 500;
 const requiredStable = 2;
 let lastText = null;
 let stableCount = 0;
 
+// ROI بصيغة نسبية مئوية والتحويل إلى بكسل يعتمد على حجم الفيديو الظاهر
+const ROI_RATIO = { cx: 0.5, cy: 0.72, w: 260, h: 60 }; // cx,cy كنقاط مركزية نسبية للعرض والارتفاع
+function computeROIBounds() {
+  const vRect = video.getBoundingClientRect();
+  const vw = vRect.width;
+  const vh = vRect.height;
+  // نحسب موضع المربع الظاهر داخل عنصر الفيديو
+  const boxW = ROI_RATIO.w;
+  const boxH = ROI_RATIO.h;
+  const left = (vRect.left + window.scrollX) + (vw/2 - boxW/2);
+  const top = (vRect.top + window.scrollY) + (vh * ROI_RATIO.cy - boxH/2);
+  // ضبط preview canvas ليطابق المربع الظاهر
+  previewCanvas.style.left = (left - (viewerRoot.getBoundingClientRect().left + window.scrollX)) + 'px';
+  previewCanvas.style.top = (top - (viewerRoot.getBoundingClientRect().top + window.scrollY)) + 'px';
+  previewCanvas.style.width = boxW + 'px';
+  previewCanvas.style.height = boxH + 'px';
+  previewCanvas.width = Math.round(boxW);
+  previewCanvas.height = Math.round(boxH);
+  // حساب إحداثيات ROI على fullCanvas بالدقة الفعلية للفيديو
+  const scaleX = fullCanvas.width / vw;
+  const scaleY = fullCanvas.height / vh;
+  const sx = Math.round((vw/2 - boxW/2) * scaleX);
+  const sy = Math.round((vh * ROI_RATIO.cy - boxH/2) * scaleY);
+  const sw = Math.round(boxW * scaleX);
+  const sh = Math.round(boxH * scaleY);
+  return { sx, sy, sw, sh, boxW, boxH };
+}
+
 // بدء الكاميرا
 async function startCamera(){
   try {
-    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    video.srcObject = s;
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+    video.srcObject = stream;
     log('Camera started');
   } catch (e) {
     resultBox.innerText = 'Camera error: ' + (e && e.message ? e.message : e);
-    log('Camera permission/availability error');
+    log('Camera error: ' + e);
   }
 }
 
-// حساب ROI بالبيكسل بالنسبة للكانڤاس الحقيقي
-function computeROIPixels(){
-  const displayW = video.clientWidth;
-  const displayH = video.clientHeight;
-  const roiW = Math.round(displayW * ROI_RATIO.w);
-  const roiH = Math.round(displayH * ROI_RATIO.h);
-  const roiX = Math.round(displayW * ROI_RATIO.x);
-  const roiY = Math.round(displayH * ROI_RATIO.y);
-  // fullCanvas يستخدم دقة الفيديو الحقيقية (640x480 افتراضياً)
-  const scaleX = fullCanvas.width / displayW;
-  const scaleY = fullCanvas.height / displayH;
-  roiPx = {
-    x: Math.max(0, Math.min(fullCanvas.width-1, Math.round(roiX * scaleX))),
-    y: Math.max(0, Math.min(fullCanvas.height-1, Math.round(roiY * scaleY))),
-    w: Math.max(1, Math.min(fullCanvas.width, Math.round(roiW * scaleX))),
-    h: Math.max(1, Math.min(fullCanvas.height, Math.round(roiH * scaleY)))
-  };
-  // مزامنة preview الظاهر (حجم/موضع)
-  preview.width = roiW;
-  preview.height = roiH;
-  preview.style.display = showPreview ? 'block' : 'none';
-  preview.style.left = '50%';
-  preview.style.transform = 'translateX(-50%)';
-  preview.style.top = roiBox.style.top;
-}
-
-// تهيئة عامل Tesseract وانتظار الجاهزية
+// تهيئة عامل Tesseract
 (async function initWorker(){
-  worker = Tesseract.createWorker({ logger: m => {/* optional */} });
+  worker = Tesseract.createWorker({ logger: m => {/* optional logging */} });
   await worker.load();
   await worker.loadLanguage('eng');
   await worker.initialize('eng');
@@ -128,52 +128,63 @@ function computeROIPixels(){
   if (videoReady) startLoop();
 })();
 
-// حدث جاهزية الفيديو
+// عندما يتوفر داتا الفيديو
 video.addEventListener('loadedmetadata', () => {
-  fullCanvas.width = video.videoWidth || 640;
-  fullCanvas.height = video.videoHeight || 480;
-  // اجعل الفيديو متجاوباً مع العرض المتاح
-  const maxW = Math.min(640, window.innerWidth - 40);
+  // اضبط fullCanvas بدقة الفيديو الفعلية
+  fullCanvas.width = video.videoWidth || 1280;
+  fullCanvas.height = video.videoHeight || 720;
+  // ضبط عرض الفيديو الظاهري ليتناسب مع الشاشة
+  const maxW = Math.min(900, window.innerWidth - 40);
   video.style.width = maxW + 'px';
   video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
-  computeROIPixels();
+  // مزامنة مكان الـ roi initial
+  computeROIBounds();
 });
 
 video.addEventListener('playing', () => {
   videoReady = true;
-  computeROIPixels();
+  computeROIBounds();
   log('Video playing');
   if (workerReady) startLoop();
 });
 
-// إعداد أزرار
+// زر التبديل لعرض المعالجة
 toggleBtn.addEventListener('click', () => {
   showPreview = !showPreview;
-  preview.style.display = showPreview ? 'block' : 'none';
+  previewCanvas.style.display = showPreview ? 'block' : 'none';
   toggleBtn.innerText = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
-  computeROIPixels();
+  computeROIBounds();
 });
 
+// زر اختبار لالتقاط لقطة ROI فورية وعرضها في نافذة جديدة
+snapBtn.addEventListener('click', async () => {
+  const b = await prepareROIBlob();
+  if (!b) { alert('ROI empty or too small'); return; }
+  const url = URL.createObjectURL(b);
+  window.open(url, '_blank');
+});
+
+// زر إعادة المحاولة
 restartBtn.addEventListener('click', () => {
   scanning = true; lastText = null; stableCount = 0; resultBox.innerText = 'Waiting...';
   if (workerReady && videoReady) startLoop();
 });
 
-// تحويل إطار الفيديو إلى صورة مقطوعة ومعالجتها ثم إرجاع blob
+// تحضير ROI: قص من fullCanvas، معالجة، نسخ إلى preview، ارجاع blob
 function prepareROIBlob(){
-  // ارسم فريم الفيديو على fullCanvas
+  // ارسم فريم الفيديو على fullCanvas بمقياس دقيق
   fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-
-  const sx = Math.max(0, Math.min(fullCanvas.width - 1, roiPx.x));
-  const sy = Math.max(0, Math.min(fullCanvas.height - 1, roiPx.y));
-  const sw = Math.max(1, Math.min(roiPx.w, fullCanvas.width - sx));
-  const sh = Math.max(1, Math.min(roiPx.h, fullCanvas.height - sy));
-
-  const targetW = roiCanvas.width; // ثابت لتقليل البكسلات
+  const { sx, sy, sw, sh, boxW, boxH } = computeROIBounds();
+  // حماية حدود
+  const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
+  const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
+  const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
+  const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
+  // رسم الجزء إلى roiCanvas المصغر (ثابت)
+  const targetW = roiCanvas.width;
   const targetH = roiCanvas.height;
   roiCtx.clearRect(0,0,targetW,targetH);
-  roiCtx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, targetW, targetH);
-
+  roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
   // معالجة: grayscale -> contrast -> threshold
   const img = roiCtx.getImageData(0,0,targetW,targetH);
   const data = img.data;
@@ -190,13 +201,12 @@ function prepareROIBlob(){
     data[i] = data[i+1] = data[i+2] = v;
   }
   roiCtx.putImageData(img, 0, 0);
-
-  // ارسم preview اذا مفعل
+  // عرض الـ preview عبر نسخ من roiCanvas إلى previewCanvas بالحجم المرئي
   if (showPreview) {
-    previewCtx.clearRect(0,0,preview.width, preview.height);
-    previewCtx.drawImage(roiCanvas, 0, 0, preview.width, preview.height);
+    previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+    previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
   }
-
+  // إرجاع blob مع فحص الحجم
   return new Promise(resolve => {
     roiCanvas.toBlob(b => {
       if (!b || b.size < 200) resolve(null); else resolve(b);
@@ -204,7 +214,7 @@ function prepareROIBlob(){
   });
 }
 
-// منطق OCR + استقرار النتيجة مع استخدام الـ regex كما هو
+// منطق الـ OCR مع استقرار النتيجة واستخدام الريجيكس كما هو
 async function doOCR(){
   if (!scanning || ocrRunning || !workerReady) return;
   const now = Date.now();
@@ -213,10 +223,10 @@ async function doOCR(){
   ocrRunning = true;
   try {
     const blob = await prepareROIBlob();
-    if (!blob) { resultBox.innerText = 'Preview empty - اضبط المربع الأحمر'; ocrRunning = false; return; }
+    if (!blob) { resultBox.innerText = 'Preview empty - اضبط المربع الأحمر أو الإضاءة'; ocrRunning = false; return; }
     const { data: { text } } = await worker.recognize(blob);
     const cleaned = (text||'').replace(/\s+/g,'');
-    const match = cleaned.match(TARGET_REGEX);
+    const match = cleaned.match(TARGET_REGEX); // نفس الريجيكس كما طلبت
     if (match) {
       const candidate = match[0];
       if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
@@ -234,7 +244,7 @@ async function doOCR(){
   }
 }
 
-// حلقة عرض/مسح بسيطة
+// حلقة تدفق هادئة
 let raf = null;
 function startLoop(){
   if (raf) return;
@@ -248,16 +258,13 @@ function startLoop(){
   raf = requestAnimationFrame(step);
 }
 
-// مساعد لعرض رسائل صغيرة للمستخدم
-function log(msg){
-  logBox.innerText = msg;
-  console.log(msg);
-}
+// مساعدة لعرض رسائل
+function log(msg){ logBox.innerText = msg; console.log(msg); }
 
-// ابدأ الكاميرا فور تحميل الصفحة
+// ابدأ الكاميرا فور التحميل
 startCamera();
 
-// تنظيف worker عند مغادرة الصفحة
+// تنظيف worker عند الخروج
 window.addEventListener('beforeunload', async () => { if (worker) await worker.terminate(); });
 
 </script>
