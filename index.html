@@ -2,7 +2,7 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Production (debug-hidden outputs)</title>
+  <title>OCR Tawkeel — Barcode + National ID</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
@@ -23,12 +23,13 @@
     pre{background:var(--panel);padding:8px;border-radius:6px;overflow:auto;max-height:220px;white-space:pre-wrap}
     #log{height:220px}
     #barcodeLabel{font-weight:bold;color:green;min-height:22px}
+    #idLabel{font-weight:bold;color:#0a57a4;min-height:22px}
     #errorLine{color:#b00;font-weight:bold;min-height:18px}
     .small{font-size:13px;color:var(--muted)}
     footer{margin-top:14px;font-size:12px;color:var(--muted)}
     .hidden { display:none !important; }
     .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; margin-bottom:10px; }
-    .debugOnly { display:none; } /* will be toggled via JS when DEBUG=true */
+    .debugOnly { display:none; } 
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
@@ -58,10 +59,11 @@
 
       <div class="row" style="margin-top:10px">
         <div><strong>رقم الباركود:</strong> <span id="barcodeLabel">Waiting...</span></div>
+        <div><strong>رقم الهوية:</strong> <span id="idLabel">Waiting...</span></div>
         <div id="errorLine"></div>
       </div>
 
-      <div style="margin-top:8px" class="small">ضع النص داخل الإطار الأحمر ثم اضغط "جرب مرة واحدة" أو انتظر المسح التلقائي</div>
+      <div style="margin-top:8px" class="small">ضع السطر/الهوية داخل الإطار الأحمر ثم اضغط "جرب مرة واحدة" أو انتظر المسح التلقائي</div>
 
       <div style="margin-top:10px" id="roiControls" class="hidden debugOnly">
         <div class="row">
@@ -119,7 +121,6 @@
         </div>
       </div>
 
-      <!-- تشخيصات فقط داخل Debug -->
       <div id="debugDiagnostics" class="hidden debugOnly">
         <div style="margin-top:10px;border:1px solid #eee;padding:10px;border-radius:6px">
           <div><strong>مخرجات تشخيصية (Debug)</strong></div>
@@ -142,10 +143,14 @@
   <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* ---------- ثابت التعرف ---------- */
-const TARGET_REGEX = /ECP\d{8}EG/;
+/* ---------- تعاريف الأنماط المطلوبة ---------- */
+/* Barcode: ECP\d{8}EG */
+const BARCODE_REGEX = /ECP\d{8}EG/;
 
-/* عناصر DOM */
+/* National ID regex (مقدّم من قبلك، استخدمناه كما هو) */
+const ID_REGEX = new RegExp('^[23](0[0-9]|[0-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])(01|02|03|04|05|06|11|12|13|14|15|16|17|18|19|21|22|23|24|25|26|27|28|29|31|32|33|34|35|88)[0-9]{5}$');
+
+/* ---------- عناصر DOM ---------- */
 const video = document.getElementById('video');
 const viewerRoot = document.getElementById('viewerRoot');
 const roiBox = document.getElementById('roi-box');
@@ -157,6 +162,7 @@ const roiCanvas = document.getElementById('roiCanvas');
 const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
 const barcodeLabel = document.getElementById('barcodeLabel');
+const idLabel = document.getElementById('idLabel');
 const rawEl = document.getElementById('raw');
 const wordsEl = document.getElementById('words');
 const logEl = document.getElementById('log');
@@ -186,21 +192,21 @@ const settingsPanel = document.getElementById('settingsPanel');
 const roiControls = document.getElementById('roiControls');
 const debugDiagnostics = document.getElementById('debugDiagnostics');
 
-/* حالات */
+/* ---------- حالات وتهيئة ---------- */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null, createWorkerFn = null;
-let scanning = true, ocrRunning = false;
+let scanning = true;
 let lastAttempt = 0, lastText = null, stableCount = 0;
 const minInterval = 400, requiredStable = 2;
 
-/* Debug flag sources: query param ?debug=1 or localStorage or keyboard shortcut */
+/* Debug flag */
 const urlParams = new URLSearchParams(location.search);
 const DEBUG_QP = urlParams.get('debug') === '1';
 const DEBUG_LS = localStorage.getItem('ocr_debug') === '1';
 let DEBUG = Boolean(DEBUG_QP || DEBUG_LS);
 
-/* apply visibility for debug-only UI */
+/* debug UI visibility */
 function setDebugUIVisible(on){
   const els = document.querySelectorAll('.debugOnly');
   els.forEach(e => { e.style.display = on ? '' : 'none'; });
@@ -216,7 +222,7 @@ function setDebugUIVisible(on){
 }
 setDebugUIVisible(DEBUG);
 
-/* log buffer - only render in debug */
+/* log buffer */
 const LOG_BUFFER = [];
 function appendLog(line){
   const t = new Date().toLocaleTimeString();
@@ -228,7 +234,7 @@ function appendLog(line){
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
 
-/* start camera */
+/* ---------- كاميرا ---------- */
 async function startCamera(){
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width:{ ideal:1280 }, height:{ ideal:720 } } });
@@ -240,7 +246,7 @@ async function startCamera(){
   }
 }
 
-/* lazy-load tesseract if needed */
+/* ---------- تحميل وتهيئة Tesseract ---------- */
 async function loadTesseractIfNeeded(){
   if (window.Tesseract) return window.Tesseract;
   appendLog('Lazy-loading Tesseract.js');
@@ -254,7 +260,6 @@ async function loadTesseractIfNeeded(){
   });
 }
 
-/* init worker (compat) */
 async function initWorker(){
   appendLog('Initializing Tesseract worker (compat mode)...');
   try {
@@ -282,7 +287,7 @@ async function initWorker(){
       await worker.loadLanguage('eng'); appendLog('language loaded: eng');
       await worker.initialize('eng'); appendLog('worker initialized');
       if (typeof worker.setParameters === 'function') {
-        try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG' }); } catch(e){ appendLog('initial setParameters failed: ' + e); }
+        try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG0123456789' }); } catch(e){ appendLog('initial setParameters failed: ' + e); }
       }
       workerReady = true; appendLog('Worker ready (createWorker)');
       if (videoReady) startLoop();
@@ -314,7 +319,8 @@ async function initWorker(){
   }
 }
 
-/* image processing helpers */
+/* ---------- معالجة الصورة ---------- */
+/* (functions: grayscaleContrast, sharpen, medianBlur, thresholdBinary, invertColors) */
 function grayscaleContrast(data, contrastFactor){
   const intercept = 128 * (1 - contrastFactor);
   for (let i=0;i<data.length;i+=4){
@@ -328,7 +334,7 @@ function medianBlur(data,w,h,passes){ if (!passes||passes<=0) return; for (let p
 function thresholdBinary(data,t){ let whiteCount=0; for (let i=0;i<data.length;i+=4){ const v = data[i] > t ? 255:0; data[i]=data[i+1]=data[i+2]=v; if (v===255) whiteCount++; } return whiteCount; }
 function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
 
-/* ROI helpers */
+/* ---------- ROI helpers ---------- */
 function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -362,7 +368,7 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-/* prepare blob */
+/* ---------- إنشاء Blob للتحليل ---------- */
 async function prepareROIBlob(){
   try { fullCtx.drawImage(video,0,0,fullCanvas.width,fullCanvas.height); } catch(e){ appendLog('drawImage error: ' + e); setError('خطأ رسم الفريم'); return null; }
   const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
@@ -391,7 +397,7 @@ async function prepareROIBlob(){
   return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* safe recognize */
+/* ---------- استدعاء Recognize بأمان ---------- */
 async function attemptRecognizeWithBlob(blob, opts){
   try {
     const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
@@ -415,7 +421,29 @@ async function safeRecognize(blob, opts){
   try { const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {}); return res; } finally { URL.revokeObjectURL(url); }
 }
 
-/* do OCR once */
+/* ---------- تحليل النص لاستخراج الباركود والهوية ---------- */
+function extractBarcodeAndID(text){
+  // نظف النص: إزالة المسافات والأسطر، لكن احتفظ بالتشكيل الرقمي
+  const cleaned = (text || '').replace(/\s+/g, '');
+  // حاول إيجاد barcode و id داخل النص
+  const barcodeMatch = cleaned.match(BARCODE_REGEX);
+  let idMatch = null;
+  // ID regex يتطلب طول كامل؛ يمكن البحث عبر أجزاء النص ذات الطول 14 مثلاً (مجموع 14؟ حسب pattern length)
+  // نمسح كل تخصيص: نبحث عن أي سلسلة بطول 14 أو 14+ تحتوي على رقم الهوية
+  // نمسح كل أرقام متتابعة في النص ونختبر كل واحدة
+  const digitSequences = cleaned.match(/\d{14,14}/g) || cleaned.match(/\d{10,14}/g) || [];
+  for (const seq of digitSequences){
+    if (ID_REGEX.test(seq)){
+      idMatch = seq;
+      break;
+    }
+  }
+  // بالإضافة، لو النص الكامل يتطابق بالإمكان إرجاعه
+  if (!idMatch && ID_REGEX.test(cleaned)) idMatch = cleaned.match(ID_REGEX)[0];
+  return { barcode: barcodeMatch ? barcodeMatch[0] : null, id: idMatch };
+}
+
+/* ---------- doOCROnce: يعرف ويعرض النتائج ---------- */
 async function doOCROnce(){
   setError('');
   if (DEBUG) { rawEl.textContent = '—'; wordsEl.textContent = '—'; }
@@ -426,7 +454,7 @@ async function doOCROnce(){
   const psm = Number(psmSelect.value) || 7;
   try {
     if (typeof worker.setParameters === 'function') {
-      try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG', tessedit_pageseg_mode: psm }); } catch(e){ appendLog('setParameters failed: ' + e); }
+      try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG0123456789', tessedit_pageseg_mode: psm }); } catch(e){ appendLog('setParameters failed: ' + e); }
     }
   } catch(e){ appendLog('setParameters outer error: ' + e); }
   appendLog('بدء recognize (PSM=' + psm + ') ...');
@@ -439,46 +467,56 @@ async function doOCROnce(){
       else wordsEl.textContent = '—';
     }
     appendLog('recognize OK, text length: ' + (res.data.text ? res.data.text.length : 0));
-    const cleaned = (res.data.text || '').replace(/\s+/g,'');
-    const match = cleaned.match(TARGET_REGEX);
-    if (match){
-      appendLog('MATCH: ' + match[0]);
-      barcodeLabel.textContent = match[0]; // عرض النتيجة تحت ليبل "رقم الباركود"
-      return match[0];
+    // استخراج الباركود والهوية
+    const { barcode, id } = extractBarcodeAndID(res.data.text || '');
+    if (barcode){
+      appendLog('Barcode found: ' + barcode);
+      barcodeLabel.textContent = barcode;
     } else {
-      appendLog('No regex match. Cleaned: "'+cleaned+'"');
-      setError('لم يتم إيجاد تطابق — جرّب PSM/Threshold/Invert');
       barcodeLabel.textContent = 'Waiting...';
-      return null;
     }
+    if (id){
+      appendLog('National ID found: ' + id);
+      idLabel.textContent = id;
+    } else {
+      idLabel.textContent = 'Waiting...';
+    }
+    // نهاية: إذا وُجد أي منهما نعيده (أولاً barcode ثم id)
+    return { barcode, id };
   } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
-/* main loop */
+/* ---------- حلقة المسح التلقائي ---------- */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
-  scanning = true; barcodeLabel.textContent = 'Waiting...'; setError('');
+  scanning = true; barcodeLabel.textContent = 'Waiting...'; idLabel.textContent = 'Waiting...'; setError('');
   while (scanning){
     const now = Date.now();
     if (now - lastAttempt < minInterval){ await new Promise(r=>setTimeout(r, minInterval)); continue; }
     lastAttempt = now;
     try {
       const res = await doOCROnce();
-      if (res){
-        if (res === lastText) stableCount++; else { lastText = res; stableCount = 1; }
-        appendLog('Stable count: ' + stableCount);
-        if (stableCount >= requiredStable){ barcodeLabel.textContent = res; appendLog('Finalized: ' + res); scanning = false; break; }
+      if (res && (res.barcode || res.id)){
+        // تأكد من الاستقرار لنص barcode أو id
+        const candidate = res.barcode || res.id;
+        if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
+        appendLog('Stable count: ' + stableCount + ' for ' + candidate);
+        if (stableCount >= requiredStable){
+          appendLog('Finalized: ' + candidate);
+          scanning = false;
+          break;
+        }
       } else { lastText = null; stableCount = 0; }
     } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r,500)); }
     await new Promise(r=>setTimeout(r,200));
   }
 }
 
-/* UI wiring */
+/* ---------- UI wiring ---------- */
 togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
 snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
 runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
-restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; barcodeLabel.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
+restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; barcodeLabel.textContent = 'Waiting...'; idLabel.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
 
 copyLogBtn.addEventListener('click', async () => {
   try {
@@ -498,7 +536,6 @@ copyLogBtn.addEventListener('click', async () => {
 });
 
 clearLogBtn && clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG && logEl) logEl.textContent=''; appendLog('log cleared'); });
-
 flushLogsBtn && flushLogsBtn.addEventListener('click', ()=>{ if (logEl) logEl.textContent = LOG_BUFFER.join('\n'); });
 
 psmSelect.addEventListener('change', ()=> appendLog('PSM changed to ' + psmSelect.value));
@@ -509,7 +546,7 @@ medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange
 
 [rX,rY,rW,rH].forEach(el => el && el.addEventListener('input', ()=>{ ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI(); }));
 
-/* keyboard shortcut Ctrl+Shift+D toggles debug (hidden feature for admins) */
+/* Ctrl+Shift+D toggles debug */
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') {
     DEBUG = !DEBUG;
@@ -519,7 +556,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-/* optional visible debug button if you want it later */
+/* optional visible debug button */
 toggleDebugBtn.addEventListener('click', ()=> {
   DEBUG = !DEBUG;
   if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
