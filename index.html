@@ -2,11 +2,11 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Barcode + National ID</title>
+  <title>OCR Tawkeel — Barcode + National ID (continuous)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
-    :root { --muted:#666; --accent:#e33; --panel:#f7f7f7; }
+    :root { --muted:#666; --accent:#0a7; --panel:#f7f7f7; }
     body{font-family:Arial,system-ui;direction:rtl;padding:12px;margin:0;color:#111}
     header{display:flex;justify-content:space-between;align-items:center;gap:12px}
     h1{font-size:18px;margin:0}
@@ -29,7 +29,7 @@
     footer{margin-top:14px;font-size:12px;color:var(--muted)}
     .hidden { display:none !important; }
     .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; margin-bottom:10px; }
-    .debugOnly { display:none; } 
+    .debugOnly { display:none; }
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
@@ -143,14 +143,14 @@
   <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* ---------- تعاريف الأنماط المطلوبة ---------- */
+/* ---------- تعاريف ---------- */
 /* Barcode: ECP\d{8}EG */
 const BARCODE_REGEX = /ECP\d{8}EG/;
 
-/* National ID regex (مقدّم من قبلك، استخدمناه كما هو) */
+/* National ID regex */
 const ID_REGEX = new RegExp('^[23](0[0-9]|[0-9][0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])(01|02|03|04|05|06|11|12|13|14|15|16|17|18|19|21|22|23|24|25|26|27|28|29|31|32|33|34|35|88)[0-9]{5}$');
 
-/* ---------- عناصر DOM ---------- */
+/* DOM */
 const video = document.getElementById('video');
 const viewerRoot = document.getElementById('viewerRoot');
 const roiBox = document.getElementById('roi-box');
@@ -192,21 +192,37 @@ const settingsPanel = document.getElementById('settingsPanel');
 const roiControls = document.getElementById('roiControls');
 const debugDiagnostics = document.getElementById('debugDiagnostics');
 
-/* ---------- حالات وتهيئة ---------- */
+/* ---------- حالات وعدادات الاستقرار (محدثة لاستمرار البحث) ---------- */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
-let worker = null, createWorkerFn = null;
+let worker = null;
 let scanning = true;
-let lastAttempt = 0, lastText = null, stableCount = 0;
-const minInterval = 400, requiredStable = 2;
 
-/* Debug flag */
+let lastAttempt = 0;
+const minInterval = 400;
+const requiredStable = 2;
+
+/* حالات النتائج المؤكدة */
+let foundBarcode = null;
+let foundID = null;
+
+/* عدادات مرشحي الاستقرار لكل هدف */
+let lastBarcodeCandidate = null;
+let stableBarcodeCount = 0;
+let lastIDCandidate = null;
+let stableIDCount = 0;
+
+/* حماية ضد حلقات لا نهائية */
+const MAX_ATTEMPTS = 2000;
+let attemptsCount = 0;
+
+/* Debug flag sources */
 const urlParams = new URLSearchParams(location.search);
 const DEBUG_QP = urlParams.get('debug') === '1';
 const DEBUG_LS = localStorage.getItem('ocr_debug') === '1';
 let DEBUG = Boolean(DEBUG_QP || DEBUG_LS);
 
-/* debug UI visibility */
+/* apply debug UI */
 function setDebugUIVisible(on){
   const els = document.querySelectorAll('.debugOnly');
   els.forEach(e => { e.style.display = on ? '' : 'none'; });
@@ -222,7 +238,7 @@ function setDebugUIVisible(on){
 }
 setDebugUIVisible(DEBUG);
 
-/* log buffer */
+/* logging buffer */
 const LOG_BUFFER = [];
 function appendLog(line){
   const t = new Date().toLocaleTimeString();
@@ -246,7 +262,7 @@ async function startCamera(){
   }
 }
 
-/* ---------- تحميل وتهيئة Tesseract ---------- */
+/* ---------- تحميل Tesseract وتهيئة العامل ---------- */
 async function loadTesseractIfNeeded(){
   if (window.Tesseract) return window.Tesseract;
   appendLog('Lazy-loading Tesseract.js');
@@ -271,16 +287,8 @@ async function initWorker(){
   }
   try {
     if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
-      createWorkerFn = Tesseract.createWorker;
+      const createWorkerFn = Tesseract.createWorker;
       appendLog('Using Tesseract.createWorker');
-    } else if (typeof Tesseract !== 'undefined' && Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
-      createWorkerFn = Tesseract.default.createWorker;
-      appendLog('Using Tesseract.default.createWorker');
-    } else {
-      appendLog('createWorker not present; will use fallback recognize if available');
-    }
-
-    if (createWorkerFn) {
       worker = createWorkerFn({ logger: m => appendLog('Tesseract: ' + (m.status || '') + ' ' + (m.progress ? (m.progress*100).toFixed(1)+'%' : '')) });
       if (!worker || typeof worker.load !== 'function') throw new Error('Worker does not expose load()');
       await worker.load(); appendLog('worker.load OK');
@@ -319,8 +327,7 @@ async function initWorker(){
   }
 }
 
-/* ---------- معالجة الصورة ---------- */
-/* (functions: grayscaleContrast, sharpen, medianBlur, thresholdBinary, invertColors) */
+/* ---------- معالجة الصورة: وظائف مساعدة ---------- */
 function grayscaleContrast(data, contrastFactor){
   const intercept = 128 * (1 - contrastFactor);
   for (let i=0;i<data.length;i+=4){
@@ -334,7 +341,7 @@ function medianBlur(data,w,h,passes){ if (!passes||passes<=0) return; for (let p
 function thresholdBinary(data,t){ let whiteCount=0; for (let i=0;i<data.length;i+=4){ const v = data[i] > t ? 255:0; data[i]=data[i+1]=data[i+2]=v; if (v===255) whiteCount++; } return whiteCount; }
 function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
 
-/* ---------- ROI helpers ---------- */
+/* ---------- ROI ---------- */
 function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -352,7 +359,6 @@ function positionROI(){
   previewCanvas.width = boxW;
   previewCanvas.height = boxH;
 }
-
 function computeROIforCapture(){
   const vRect = video.getBoundingClientRect();
   const vw = vRect.width, vh = vRect.height;
@@ -368,7 +374,7 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-/* ---------- إنشاء Blob للتحليل ---------- */
+/* ---------- تحضير Blob للـ OCR ---------- */
 async function prepareROIBlob(){
   try { fullCtx.drawImage(video,0,0,fullCanvas.width,fullCanvas.height); } catch(e){ appendLog('drawImage error: ' + e); setError('خطأ رسم الفريم'); return null; }
   const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
@@ -397,7 +403,7 @@ async function prepareROIBlob(){
   return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* ---------- استدعاء Recognize بأمان ---------- */
+/* ---------- استدعاء recognize بأمان ---------- */
 async function attemptRecognizeWithBlob(blob, opts){
   try {
     const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
@@ -421,29 +427,24 @@ async function safeRecognize(blob, opts){
   try { const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {}); return res; } finally { URL.revokeObjectURL(url); }
 }
 
-/* ---------- تحليل النص لاستخراج الباركود والهوية ---------- */
+/* ---------- استخراج الباركود والهوية من النص ---------- */
 function extractBarcodeAndID(text){
-  // نظف النص: إزالة المسافات والأسطر، لكن احتفظ بالتشكيل الرقمي
   const cleaned = (text || '').replace(/\s+/g, '');
-  // حاول إيجاد barcode و id داخل النص
   const barcodeMatch = cleaned.match(BARCODE_REGEX);
   let idMatch = null;
-  // ID regex يتطلب طول كامل؛ يمكن البحث عبر أجزاء النص ذات الطول 14 مثلاً (مجموع 14؟ حسب pattern length)
-  // نمسح كل تخصيص: نبحث عن أي سلسلة بطول 14 أو 14+ تحتوي على رقم الهوية
-  // نمسح كل أرقام متتابعة في النص ونختبر كل واحدة
-  const digitSequences = cleaned.match(/\d{14,14}/g) || cleaned.match(/\d{10,14}/g) || [];
-  for (const seq of digitSequences){
+  // البحث عن تسلسلات أرقام مناسبة لاختبارها مقابل تعبير الهوية
+  const digitSeqs = (cleaned.match(/\d{10,14}/g) || []);
+  for (const seq of digitSeqs){
     if (ID_REGEX.test(seq)){
       idMatch = seq;
       break;
     }
   }
-  // بالإضافة، لو النص الكامل يتطابق بالإمكان إرجاعه
   if (!idMatch && ID_REGEX.test(cleaned)) idMatch = cleaned.match(ID_REGEX)[0];
   return { barcode: barcodeMatch ? barcodeMatch[0] : null, id: idMatch };
 }
 
-/* ---------- doOCROnce: يعرف ويعرض النتائج ---------- */
+/* ---------- doOCROnce ---------- */
 async function doOCROnce(){
   setError('');
   if (DEBUG) { rawEl.textContent = '—'; wordsEl.textContent = '—'; }
@@ -467,56 +468,100 @@ async function doOCROnce(){
       else wordsEl.textContent = '—';
     }
     appendLog('recognize OK, text length: ' + (res.data.text ? res.data.text.length : 0));
-    // استخراج الباركود والهوية
     const { barcode, id } = extractBarcodeAndID(res.data.text || '');
-    if (barcode){
-      appendLog('Barcode found: ' + barcode);
-      barcodeLabel.textContent = barcode;
-    } else {
-      barcodeLabel.textContent = 'Waiting...';
-    }
-    if (id){
-      appendLog('National ID found: ' + id);
-      idLabel.textContent = id;
-    } else {
-      idLabel.textContent = 'Waiting...';
-    }
-    // نهاية: إذا وُجد أي منهما نعيده (أولاً barcode ثم id)
+    if (barcode) appendLog('Barcode candidate from OCR: ' + barcode);
+    if (id) appendLog('ID candidate from OCR: ' + id);
     return { barcode, id };
   } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
-/* ---------- حلقة المسح التلقائي ---------- */
+/* ---------- حلقة البحث المستمر (تتواصل حتى تؤكد كلا القيمتين أو تتوقف يدوياً) ---------- */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
-  scanning = true; barcodeLabel.textContent = 'Waiting...'; idLabel.textContent = 'Waiting...'; setError('');
+  scanning = true;
+  barcodeLabel.textContent = foundBarcode || 'Waiting...';
+  idLabel.textContent = foundID || 'Waiting...';
+  setError('');
+  attemptsCount = 0;
+
   while (scanning){
     const now = Date.now();
     if (now - lastAttempt < minInterval){ await new Promise(r=>setTimeout(r, minInterval)); continue; }
     lastAttempt = now;
+    attemptsCount++;
+
     try {
       const res = await doOCROnce();
-      if (res && (res.barcode || res.id)){
-        // تأكد من الاستقرار لنص barcode أو id
-        const candidate = res.barcode || res.id;
-        if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
-        appendLog('Stable count: ' + stableCount + ' for ' + candidate);
-        if (stableCount >= requiredStable){
-          appendLog('Finalized: ' + candidate);
-          scanning = false;
-          break;
+      if (!res){
+        stableBarcodeCount = 0;
+        stableIDCount = 0;
+      } else {
+        // barcode handling
+        if (res.barcode){
+          if (res.barcode === lastBarcodeCandidate) stableBarcodeCount++; else { lastBarcodeCandidate = res.barcode; stableBarcodeCount = 1; }
+          appendLog('Barcode candidate: ' + res.barcode + ' (stable=' + stableBarcodeCount + ')');
+          if (stableBarcodeCount >= requiredStable && !foundBarcode){
+            foundBarcode = lastBarcodeCandidate;
+            barcodeLabel.textContent = foundBarcode;
+            appendLog('Barcode confirmed: ' + foundBarcode);
+          }
+        } else {
+          lastBarcodeCandidate = null;
+          stableBarcodeCount = 0;
         }
-      } else { lastText = null; stableCount = 0; }
-    } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r,500)); }
+
+        // ID handling
+        if (res.id){
+          if (res.id === lastIDCandidate) stableIDCount++; else { lastIDCandidate = res.id; stableIDCount = 1; }
+          appendLog('ID candidate: ' + res.id + ' (stable=' + stableIDCount + ')');
+          if (stableIDCount >= requiredStable && !foundID){
+            foundID = lastIDCandidate;
+            idLabel.textContent = foundID;
+            appendLog('ID confirmed: ' + foundID);
+          }
+        } else {
+          lastIDCandidate = null;
+          stableIDCount = 0;
+        }
+      }
+
+      // end conditions
+      if (foundBarcode && foundID){
+        appendLog('Both barcode and ID confirmed. Stopping automatic loop.');
+        scanning = false;
+        break;
+      }
+
+      if (attemptsCount >= MAX_ATTEMPTS){
+        appendLog('Reached max attempts (' + MAX_ATTEMPTS + '). Stopping.');
+        scanning = false;
+        break;
+      }
+
+    } catch(e){
+      appendLog('Loop error: ' + e);
+      await new Promise(r=>setTimeout(r,500));
+    }
     await new Promise(r=>setTimeout(r,200));
   }
 }
 
 /* ---------- UI wiring ---------- */
 togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
+
 snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
+
 runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
-restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; barcodeLabel.textContent = 'Waiting...'; idLabel.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
+
+restartBtn.addEventListener('click', ()=> {
+  // لا تمسّ النتائج المؤكدة؛ أعد محاولة التقاط الناقص فقط
+  if (!foundBarcode) { lastBarcodeCandidate = null; stableBarcodeCount = 0; }
+  if (!foundID) { lastIDCandidate = null; stableIDCount = 0; }
+  attemptsCount = 0;
+  scanning = true;
+  setError('');
+  if (workerReady && videoReady) startLoop();
+});
 
 copyLogBtn.addEventListener('click', async () => {
   try {
@@ -556,7 +601,7 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-/* optional visible debug button */
+/* optional debug button */
 toggleDebugBtn.addEventListener('click', ()=> {
   DEBUG = !DEBUG;
   if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
