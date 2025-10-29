@@ -2,27 +2,28 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Full Debuggable</title>
+  <title>OCR Tawkeel — Full Debuggable with Copy Log</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <!-- حاول النسخة الافتراضية؛ إن ظهر خطأ worker.load is not a function استبدل السطر أعلاه بالـ CDN الخاص بالإصدارات القديمة كما في الملاحظة أعلاه -->
+  <!-- إذا ظهرت رسالة worker.load is not a function جرّب تغيير السطر التالي إلى:
+       <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align:center; padding:12px; direction:rtl; }
-    .viewer { position:relative; display:inline-block; margin-top:8px; }
-    video { border:2px solid #444; border-radius:8px; background:#000; display:block; max-width:90vw; height:auto; }
-    #roi-box { position:absolute; border:2px dashed #e33; box-sizing:border-box; pointer-events:none; }
-    #preview-canvas { position:absolute; pointer-events:none; image-rendering:pixelated; border-radius:4px; display:none; border:1px solid rgba(0,0,0,0.12); background:#fff; }
-    #controls { margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
-    #info { margin-top:10px; text-align:left; max-width:980px; margin-left:auto; margin-right:auto; }
-    .row { display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap; }
-    label { font-size:13px; min-width:90px; text-align:left; }
-    input[type="range"] { width:180px; }
-    pre { background:#f7f7f7; padding:8px; border-radius:6px; overflow:auto; max-height:240px; white-space:pre-wrap; }
-    button { padding:8px 12px; }
-    #result { font-weight:bold; color:green; min-height:22px; }
-    #errorLine { color:#b00; font-weight:bold; min-height:18px; }
-    small.gray { color:#666; }
-    @media (max-width:700px) { video { width:360px; height:270px; } }
+    body{font-family:Arial;direction:rtl;padding:12px;text-align:center}
+    .viewer{position:relative;display:inline-block;margin-top:8px}
+    video{border:2px solid #444;border-radius:8px;background:#000;display:block;max-width:90vw;height:auto}
+    #roi-box{position:absolute;border:2px dashed #e33;box-sizing:border-box;pointer-events:none}
+    #preview-canvas{position:absolute;pointer-events:none;image-rendering:pixelated;border-radius:4px;display:none;background:#fff}
+    #controls{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+    #info{margin-top:10px;text-align:left;max-width:980px;margin-left:auto;margin-right:auto}
+    .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
+    pre{background:#f7f7f7;padding:8px;border-radius:6px;overflow:auto;max-height:240px;white-space:pre-wrap}
+    label{min-width:90px}
+    input[type="range"]{width:160px}
+    #result{font-weight:bold;color:green;min-height:22px}
+    #errorLine{color:#b00;font-weight:bold;min-height:18px}
+    button{padding:8px 12px}
+    @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
 <body>
@@ -39,6 +40,7 @@
     <button id="snapBtn">فتح Snap</button>
     <button id="restartBtn">إعادة محاولة</button>
     <button id="runOnceBtn">جرب مرة واحدة الآن</button>
+    <button id="copyLogBtn">نسخ سجل التشغيل</button>
   </div>
 
   <div id="info">
@@ -47,7 +49,7 @@
       <div id="errorLine"></div>
     </div>
 
-    <div style="margin-top:8px;"><strong>خيارات المعالجة وTesseract</strong></div>
+    <div style="margin-top:8px"><strong>خيارات المعالجة وTesseract</strong></div>
     <div class="row">
       <label>PSM</label>
       <select id="psmSelect">
@@ -83,7 +85,7 @@
       <input id="forceInvert" type="checkbox">
     </div>
 
-    <div style="margin-top:8px;"><strong>ROI Tune</strong> <small class="gray">حرك المربعات حتى يظهر السطر داخل الإطار الأحمر</small></div>
+    <div style="margin-top:8px"><strong>ROI Tune</strong> <small style="color:#666">حرك المربعات حتى يظهر السطر داخل الإطار الأحمر</small></div>
     <div class="row">
       <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
       <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
@@ -91,7 +93,7 @@
       <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
     </div>
 
-    <div style="margin-top:10px;"><strong>مخرجات تشخيصية</strong></div>
+    <div style="margin-top:10px"><strong>مخرجات تشخيصية</strong></div>
     <div class="row">
       <div style="flex:1">
         <div><strong>Raw OCR</strong></div>
@@ -103,7 +105,7 @@
       </div>
     </div>
 
-    <div style="margin-top:10px;"><strong>سجل التشغيل (رسائل الأخطاء والتقدم)</strong></div>
+    <div style="margin-top:10px"><strong>سجل التشغيل (رسائل الأخطاء والتقدم)</strong></div>
     <pre id="log">جاري التهيئة...</pre>
   </div>
 
@@ -111,7 +113,7 @@
   <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* ثابت: لا تغيّر هذا النمط */
+/* ثابت: لا تغيّر */
 const TARGET_REGEX = /ECP\d{8}EG/;
 
 const video = document.getElementById('video');
@@ -134,6 +136,7 @@ const togglePreview = document.getElementById('togglePreview');
 const snapBtn = document.getElementById('snapBtn');
 const restartBtn = document.getElementById('restartBtn');
 const runOnceBtn = document.getElementById('runOnceBtn');
+const copyLogBtn = document.getElementById('copyLogBtn');
 
 const psmSelect = document.getElementById('psmSelect');
 const upscaleSelect = document.getElementById('upscaleSelect');
@@ -149,8 +152,7 @@ const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW
 
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
-let worker = null;
-let createWorkerFn = null;
+let worker = null, createWorkerFn = null;
 let scanning = true, ocrRunning = false;
 let lastAttempt = 0, lastText = null, stableCount = 0;
 const minInterval = 400, requiredStable = 2;
@@ -159,7 +161,7 @@ function appendLog(line){
   const t = new Date().toLocaleTimeString();
   logEl.textContent = `[${t}] ${line}\n` + logEl.textContent;
 }
-function setError(msg){ errorLine.textContent = msg || ''; }
+function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
 
 /* start camera */
 function startCamera(){
@@ -168,85 +170,66 @@ function startCamera(){
     .catch(e => { appendLog('Camera error: ' + (e && e.message ? e.message : e)); setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e)); });
 }
 
-/* ---------- Compat initWorker: يحاول createWorker ثم fallback إلى recognize ---------- */
-const PSM = (typeof Tesseract !== 'undefined' && Tesseract.PSM) ? Tesseract.PSM : null;
-const OEM = (typeof Tesseract !== 'undefined' && Tesseract.OEM) ? Tesseract.OEM : null;
+/* Compat initWorker */
+(async function initWorker(){
+  appendLog('بدء تهيئة Tesseract (توافقي)...');
 
-async function initWorker() {
-  appendLog('بدء تهيئة Tesseract (محاولة توافقية)...');
+  try {
+    if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
+      createWorkerFn = Tesseract.createWorker;
+      appendLog('استخدمنا Tesseract.createWorker');
+    } else if (typeof Tesseract !== 'undefined' && Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
+      createWorkerFn = Tesseract.default.createWorker;
+      appendLog('استخدمنا Tesseract.default.createWorker');
+    } else {
+      appendLog('createWorker غير متاح — سنحاول fallback باستخدام Tesseract.recognize إن أمكن');
+    }
 
-  if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
-    createWorkerFn = Tesseract.createWorker;
-    appendLog('استخدمنا Tesseract.createWorker مباشرة');
-  } else if (typeof Tesseract !== 'undefined' && Tesseract.default && typeof Tesseract.default.createWorker === 'function') {
-    createWorkerFn = Tesseract.default.createWorker;
-    appendLog('استخدمنا Tesseract.default.createWorker');
-  } else {
-    appendLog('createWorker غير متاحة في كائن Tesseract المحمّل؛ سنحاول fallback عبر Tesseract.recognize إن امكن');
-  }
-
-  if (createWorkerFn) {
-    try {
-      worker = createWorkerFn({
-        logger: m => { appendLog('Tesseract: ' + (m.status || '') + ' ' + ((m.progress||'')*100).toString().slice(0,6)); }
-      });
-      await worker.load();
-      appendLog('worker.load OK');
-      await worker.loadLanguage('eng');
-      appendLog('language loaded: eng');
-      await worker.initialize('eng');
-      appendLog('worker initialized OK');
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ECP0123456789EG',
-        tessedit_ocr_engine_mode: OEM ? OEM.LSTM_ONLY : 1,
-        tessedit_pageseg_mode: (PSM && PSM.SINGLE_LINE) ? PSM.SINGLE_LINE : 7
-      });
-      workerReady = true;
-      appendLog('Worker ready (via createWorker)');
+    if (createWorkerFn) {
+      worker = createWorkerFn({ logger: m => appendLog('Tesseract: ' + (m.status||'') + ' ' + (m.progress ? (m.progress*100).toFixed(1)+'%' : '')) });
+      if (!worker || typeof worker.load !== 'function') {
+        throw new Error('الـ worker المنشأ لا يملك دالة load (واجهة غير متوقعة)');
+      }
+      await worker.load(); appendLog('worker.load OK');
+      await worker.loadLanguage('eng'); appendLog('language loaded: eng');
+      await worker.initialize('eng'); appendLog('worker initialized');
+      if (typeof worker.setParameters === 'function') {
+        try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG' }); } catch(e){ appendLog('setParameters initial failed: ' + e); }
+      }
+      workerReady = true; appendLog('Worker ready (createWorker)');
       if (videoReady) startLoop();
       return;
-    } catch (err) {
-      appendLog('خطأ أثناء init worker: ' + err);
-      setError('خطأ init worker: ' + (err && err.message ? err.message : err));
-      worker = null;
     }
+
+    if (typeof Tesseract !== 'undefined' && typeof Tesseract.recognize === 'function') {
+      appendLog('Fallback: Tesseract.recognize موجود، نستخدمه');
+      worker = {
+        recognize: async (blob, opts = {}) => {
+          if (!blob) throw new Error('recognize: blob is null');
+          const tmpUrl = URL.createObjectURL(blob);
+          try {
+            const res = await Tesseract.recognize(tmpUrl, 'eng', opts);
+            return res;
+          } finally { URL.revokeObjectURL(tmpUrl); }
+        },
+        setParameters: async ()=>{},
+        terminate: async ()=>{}
+      };
+      workerReady = true; appendLog('Worker ready (fallback recognize)');
+      if (videoReady) startLoop();
+      return;
+    }
+
+    appendLog('لم نجد واجهة Tesseract مناسبة. استخدم CDN متوافق إن لزم.');
+    setError('لم يتم تحميل واجهة Tesseract المناسبة. جرّب CDN ثابت مثل tesseract.js@2.1.5');
+  } catch (err) {
+    appendLog('initWorker failed: ' + (err && err.message ? err.message : err));
+    setError('initWorker failed: ' + (err && err.message ? err.message : err));
+    worker = null;
   }
+})();
 
-  // fallback: use Tesseract.recognize if available
-  if (typeof Tesseract !== 'undefined' && typeof Tesseract.recognize === 'function') {
-    appendLog('استخدام fallback: Tesseract.recognize متوفر');
-    worker = {
-      recognize: async (blob, opts = {}) => {
-        const url = URL.createObjectURL(blob);
-        try {
-          const res = await Tesseract.recognize(url, 'eng', {
-            tessedit_char_whitelist: 'ECP0123456789EG',
-            tessedit_pageseg_mode: Number(psmSelect.value) || 7
-          });
-          URL.revokeObjectURL(url);
-          return res;
-        } catch (e) {
-          URL.revokeObjectURL(url);
-          throw e;
-        }
-      },
-      setParameters: async () => {},
-      terminate: async () => {}
-    };
-    workerReady = true;
-    appendLog('Fallback recognize جاهز (أبطأ لكن مفيد للتشخيص)');
-    if (videoReady) startLoop();
-    return;
-  }
-
-  appendLog('لم نجد واجهة Tesseract مناسبة. رجاءً استخدم CDN متوافق (مثلاً: https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js)');
-  setError('لم يتم تحميل واجهة Tesseract المناسبة. جرب نسخة CDN متوافقة.');
-}
-/* call init */
-initWorker();
-/* ---------- end initWorker ---------- */
-
-/* ROI / preview positioning functions */
+/* ROI positioning */
 function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -283,157 +266,105 @@ function computeROIforCapture(){
 /* image processing helpers */
 function grayscaleContrast(data, contrastFactor){
   const intercept = 128 * (1 - contrastFactor);
-  for (let i = 0; i < data.length; i += 4){
+  for (let i=0;i<data.length;i+=4){
     const g = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
     let v = g * contrastFactor + intercept;
-    data[i] = data[i+1] = data[i+2] = v;
-  }
-}
-function sharpen(data, w, h, amount){
-  if (!amount || amount <= 0) return;
-  const copy = new Uint8ClampedArray(data);
-  for (let y = 1; y < h-1; y++){
-    for (let x = 1; x < w-1; x++){
-      const idx = (y*w + x)*4;
-      const center = copy[idx];
-      const up = copy[((y-1)*w + x)*4];
-      const down = copy[((y+1)*w + x)*4];
-      const left = copy[(y*w + (x-1))*4];
-      const right = copy[(y*w + (x+1))*4];
-      let v = (1 + amount*4)*center - amount*(up + down + left + right);
-      v = Math.max(0, Math.min(255, v));
-      data[idx] = data[idx+1] = data[idx+2] = v;
-    }
-  }
-}
-function medianBlur(data, w, h, passes){
-  if (!passes || passes <= 0) return;
-  for (let p=0; p<passes; p++){
-    const copy = new Uint8ClampedArray(data);
-    for (let y = 1; y < h-1; y++){
-      for (let x = 1; x < w-1; x++){
-        const vals = [];
-        for (let yy=-1; yy<=1; yy++){
-          for (let xx=-1; xx<=1; xx++){
-            const id = ((y+yy)*w + (x+xx))*4;
-            vals.push(copy[id]);
-          }
-        }
-        vals.sort((a,b)=>a-b);
-        const med = vals[4];
-        const idc = (y*w + x)*4;
-        data[idc] = data[idc+1] = data[idc+2] = med;
-      }
-    }
-  }
-}
-function thresholdBinary(data, t){
-  let whiteCount = 0;
-  for (let i=0;i<data.length;i+=4){
-    const v = data[i] > t ? 255:0;
     data[i]=data[i+1]=data[i+2]=v;
-    if (v===255) whiteCount++;
   }
-  return whiteCount;
 }
+function sharpen(data,w,h,amount){ if (!amount||amount<=0) return; const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const idx=(y*w+x)*4; const center=copy[idx]; const up=copy[((y-1)*w+x)*4]; const down=copy[((y+1)*w+x)*4]; const left=copy[(y*w+(x-1))*4]; const right=copy[(y*w+(x+1))*4]; let v=(1+amount*4)*center - amount*(up+down+left+right); v=Math.max(0,Math.min(255,v)); data[idx]=data[idx+1]=data[idx+2]=v; } } }
+function medianBlur(data,w,h,passes){ if (!passes||passes<=0) return; for (let p=0;p<passes;p++){ const copy=new Uint8ClampedArray(data); for (let y=1;y<h-1;y++){ for (let x=1;x<w-1;x++){ const vals=[]; for (let yy=-1;yy<=1;yy++){ for (let xx=-1;xx<=1;xx++){ const id = ((y+yy)*w + (x+xx))*4; vals.push(copy[id]); } } vals.sort((a,b)=>a-b); const med=vals[4]; const idc=(y*w + x)*4; data[idc]=data[idc+1]=data[idc+2]=med; } } } }
+function thresholdBinary(data,t){ let whiteCount=0; for (let i=0;i<data.length;i+=4){ const v = data[i] > t ? 255:0; data[i]=data[i+1]=data[i+2]=v; if (v===255) whiteCount++; } return whiteCount; }
 function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; }}
 
-/* prepare blob with tunables and diagnostics */
+/* prepare ROI blob */
 async function prepareROIBlob(){
-  try { fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height); }
-  catch(e){ appendLog('خطأ أثناء drawImage: ' + e); setError('خطأ رسم الفريم'); return null; }
+  try { fullCtx.drawImage(video,0,0,fullCanvas.width,fullCanvas.height); } catch(e){ appendLog('drawImage error: ' + e); setError('خطأ رسم الفريم'); return null; }
   const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
   if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الفيديو'); setError('ROI غير داخل إطار الفيديو'); return null; }
   const factor = Number(upscaleSelect.value) || 2;
   const targetW = Math.max(120, Math.round(dstW * factor));
   const targetH = Math.max(24, Math.round(dstH * factor));
-  roiCanvas.width = targetW; roiCanvas.height = targetH;
-  roiCtx.clearRect(0,0,targetW,targetH);
-  const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
-  const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
+  roiCanvas.width = targetW; roiCanvas.height = targetH; roiCtx.clearRect(0,0,targetW,targetH);
+  const safeSx = Math.max(0, Math.min(fullCanvas.width-1, sx));
+  const safeSy = Math.max(0, Math.min(fullCanvas.height-1, sy));
   const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
   const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
   roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
   let img;
-  try { img = roiCtx.getImageData(0,0,targetW,targetH); }
-  catch(e){ appendLog('getImageData failed: ' + e); setError('getImageData failed'); return null; }
+  try { img = roiCtx.getImageData(0,0,targetW,targetH); } catch(e){ appendLog('getImageData failed: ' + e); setError('getImageData failed'); return null; }
   const data = img.data;
-  // pipeline
-  const contrastFactor = 1.6;
-  grayscaleContrast(data, contrastFactor);
-  const sharpenAmount = Number(sharpenRange.value) || 0;
-  if (sharpenAmount > 0) sharpen(data, targetW, targetH, sharpenAmount);
-  const medianPasses = Number(medianRange.value) || 0;
-  if (medianPasses > 0) medianBlur(data, targetW, targetH, medianPasses);
-  const thresh = Number(threshRange.value) || 140;
-  const whiteCount = thresholdBinary(data, thresh);
+  const contrastFactor = 1.6; grayscaleContrast(data, contrastFactor);
+  const sharpenAmount = Number(sharpenRange.value) || 0; if (sharpenAmount>0) sharpen(data,targetW,targetH,sharpenAmount);
+  const medianPasses = Number(medianRange.value) || 0; if (medianPasses>0) medianBlur(data,targetW,targetH,medianPasses);
+  const thresh = Number(threshRange.value) || 140; const whiteCount = thresholdBinary(data,thresh);
   const whiteRatio = whiteCount / (data.length/4);
   const force = forceInvert.checked;
   if (force){ invertColors(data); appendLog('Force invert applied'); }
-  else {
-    if (whiteRatio < 0.5){ invertColors(data); appendLog('Auto invert applied (whiteRatio=' + whiteRatio.toFixed(2) + ')'); }
-    else appendLog('No invert (whiteRatio=' + whiteRatio.toFixed(2) + ')');
-  }
-  roiCtx.putImageData(img, 0, 0);
-  if (showPreview){
-    try { previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height); previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height); }
-    catch(e){ appendLog('preview draw error: ' + e); }
-    previewCanvas.style.display = 'block';
-  }
-  return new Promise(resolve => {
-    roiCanvas.toBlob(b => {
-      if (!b){ appendLog('toBlob returned null'); resolve(null); }
-      else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); }
-      else resolve(b);
-    }, 'image/png');
-  });
+  else { if (whiteRatio < 0.5){ invertColors(data); appendLog('Auto invert applied (whiteRatio=' + whiteRatio.toFixed(2) + ')'); } else appendLog('No invert (whiteRatio=' + whiteRatio.toFixed(2) + ')'); }
+  roiCtx.putImageData(img,0,0);
+  if (showPreview){ try{ previewCtx.clearRect(0,0,previewCanvas.width,previewCanvas.height); previewCtx.drawImage(roiCanvas,0,0,previewCanvas.width,previewCanvas.height); } catch(e){ appendLog('preview draw error: ' + e); } previewCanvas.style.display='block'; }
+  return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* do OCR once, with diagnostics and PSM selectable */
+/* safe recognize helpers to avoid .endsWith errors */
+async function attemptRecognizeWithBlob(blob, opts){
+  try {
+    const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
+    return res;
+  } catch (e){
+    const msg = (e && e.message) ? e.message.toLowerCase() : '';
+    if (msg.includes('endwith') || msg.includes('endswith') || msg.includes('is not a function') || msg.includes('undefined')) {
+      appendLog('Direct blob recognize failed: ' + (e && e.message ? e.message : e));
+      return null;
+    }
+    throw e;
+  }
+}
+async function safeRecognize(blob, opts){
+  if (!blob) throw new Error('safeRecognize: blob is null');
+  if (!worker) throw new Error('safeRecognize: worker is null');
+  if (typeof worker.recognize !== 'function') throw new Error('safeRecognize: worker.recognize is not a function');
+  // try blob direct
+  const tryDirect = await attemptRecognizeWithBlob(blob, opts).catch(e => { appendLog('attemptRecognizeWithBlob threw: ' + e); return null; });
+  if (tryDirect) return tryDirect;
+  // fallback to URL
+  const url = URL.createObjectURL(blob);
+  try {
+    const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
+    return res;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/* do OCR once */
 async function doOCROnce(){
   setError('');
   rawEl.textContent = '—'; wordsEl.textContent = '—';
   if (!workerReady){ setError('عامل Tesseract غير جاهز'); appendLog('Worker not ready'); return null; }
   if (!videoReady){ setError('الكاميرا غير جاهزة'); appendLog('Video not ready'); return null; }
   const blob = await prepareROIBlob();
-  if (!blob){ setError('الصورة المعالجة فارغة أو صغيرة — راجع ROI/الإضاءة/الإعدادات'); return null; }
+  if (!blob){ setError('الصورة المعالجة فارغة أو صغيرة — عدّل ROI/الإضاءة/الإعدادات'); return null; }
   const psm = Number(psmSelect.value) || 7;
   try {
-    if (worker && typeof worker.setParameters === 'function'){
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ECP0123456789EG',
-        tessedit_pageseg_mode: psm,
-        tessedit_ocr_engine_mode: (OEM ? OEM.LSTM_ONLY : 1)
-      });
+    if (typeof worker.setParameters === 'function') {
+      try { await worker.setParameters({ tessedit_char_whitelist: 'ECP0123456789EG', tessedit_pageseg_mode: psm }); } catch(e){ appendLog('setParameters failed: ' + e); }
     }
-  } catch(e){ appendLog('setParameters error: ' + e); }
+  } catch(e){ appendLog('setParameters outer error: ' + e); }
   appendLog('بدء recognize (PSM=' + psm + ') ...');
   try {
-    const { data } = await worker.recognize(blob);
-    rawEl.textContent = data && data.text ? data.text : '';
-    if (data && data.words && data.words.length){
-      const lines = data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`);
-      wordsEl.textContent = lines.join('\n');
-    } else { wordsEl.textContent = '—'; }
-    appendLog('recognize done, text length: ' + (data && data.text ? data.text.length : 0));
-    const cleaned = (data && data.text ? data.text.replace(/\s+/g,'') : '');
+    const res = await safeRecognize(blob, { lang: 'eng' });
+    if (!res || !res.data){ appendLog('recognize returned no data'); setError('recognize returned no data'); return null; }
+    rawEl.textContent = res.data.text || '';
+    if (res.data.words && res.data.words.length){ wordsEl.textContent = res.data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`).join('\n'); } else wordsEl.textContent = '—';
+    appendLog('recognize OK, text length: ' + (res.data.text ? res.data.text.length : 0));
+    const cleaned = (res.data.text || '').replace(/\s+/g,'');
     const match = cleaned.match(TARGET_REGEX);
-    if (match){
-      appendLog('MATCH: ' + match[0]);
-      return match[0];
-    } else {
-      appendLog('No regex match. Cleaned text: "' + cleaned + '"');
-      setError('لم يتم إيجاد تطابق بالنمط — جرّب PSM أو تعديل Threshold/Invert');
-      return null;
-    }
-  } catch (e){
-    appendLog('recognize error: ' + e);
-    setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e));
-    throw e;
-  }
+    if (match){ appendLog('MATCH: ' + match[0]); return match[0]; }
+    else { appendLog('No regex match. Cleaned: "'+cleaned+'"'); setError('لم يتم إيجاد تطابق — جرّب PSM/Threshold/Invert'); return null; }
+  } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
-/* repeated attempt loop */
+/* loop */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
   scanning = true; resultEl.textContent = 'Waiting...'; setError('');
@@ -448,8 +379,8 @@ async function startLoop(){
         appendLog('Stable count: ' + stableCount);
         if (stableCount >= requiredStable){ resultEl.textContent = res; appendLog('Finalized: ' + res); scanning = false; break; }
       } else { lastText = null; stableCount = 0; }
-    } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r, 500)); }
-    await new Promise(r=>setTimeout(r, 200));
+    } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r,500)); }
+    await new Promise(r=>setTimeout(r,200));
   }
 }
 
@@ -460,28 +391,50 @@ togglePreview.addEventListener('click', () => {
   togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
   positionROI();
 });
+
 snapBtn.addEventListener('click', async () => {
   const b = await prepareROIBlob();
   if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; }
   window.open(URL.createObjectURL(b), '_blank');
 });
+
 restartBtn.addEventListener('click', () => {
   scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError('');
   if (workerReady && videoReady) startLoop();
 });
+
 runOnceBtn.addEventListener('click', async () => {
   try { await doOCROnce(); } catch(e){ appendLog('runOnce error: ' + e); }
 });
+
+copyLogBtn.addEventListener('click', async () => {
+  try {
+    const text = logEl.textContent || '';
+    if (!text) { appendLog('لا يوجد شيء لنسخه من السجل'); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      appendLog('تم نسخ سجل التشغيل إلى الحافظة');
+      copyLogBtn.textContent = 'تم النسخ';
+      setTimeout(() => { copyLogBtn.textContent = 'نسخ سجل التشغيل'; }, 1500);
+      return;
+    }
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand('copy'); document.body.removeChild(ta);
+    if (ok) { appendLog('تم نسخ سجل التشغيل (fallback)'); copyLogBtn.textContent = 'تم النسخ'; setTimeout(()=>{copyLogBtn.textContent='نسخ سجل التشغيل'},1500); }
+    else { appendLog('فشل النسخ عبر fallback'); setError('فشل النسخ — انسخ يدوياً'); }
+  } catch(err){ appendLog('خطأ أثناء النسخ: ' + (err && err.message ? err.message : err)); setError('خطأ أثناء النسخ'); }
+});
+
 psmSelect.addEventListener('change', () => appendLog('PSM changed to ' + psmSelect.value));
 upscaleSelect.addEventListener('change', () => appendLog('Upscale set to ' + upscaleSelect.value));
-threshRange.addEventListener('input', ()=> { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
-sharpenRange.addEventListener('input', ()=> { sharpenVal.textContent = sharpenRange.value; });
-medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange.value; });
+threshRange.addEventListener('input', () => { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
+sharpenRange.addEventListener('input', () => { sharpenVal.textContent = sharpenRange.value; });
+medianRange.addEventListener('input', () => { medianVal.textContent = medianRange.value; });
 [rX,rY,rW,rH].forEach(el => el.addEventListener('input', () => {
   ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI();
 }));
 
-/* when video metadata ready */
+/* video metadata */
 video.addEventListener('loadedmetadata', () => {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
@@ -495,7 +448,7 @@ video.addEventListener('loadedmetadata', () => {
   if (workerReady) startLoop();
 });
 
-/* start camera and init messages */
+/* start camera & initial logs */
 startCamera();
 appendLog('الصفحة محمّلة. انتظر تهيئة العامل والكاميرا...');
 threshVal.textContent = threshRange.value;
