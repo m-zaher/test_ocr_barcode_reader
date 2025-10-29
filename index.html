@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
-    :root { --muted:#666; --accent:#0a7; --panel:#f7f7f7; }
+    :root { --muted:#666; --accent:#e33; --panel:#f7f7f7; }
     body{font-family:Arial,system-ui;direction:rtl;padding:12px;margin:0;color:#111}
     header{display:flex;justify-content:space-between;align-items:center;gap:12px}
     h1{font-size:18px;margin:0}
@@ -29,7 +29,7 @@
     footer{margin-top:14px;font-size:12px;color:var(--muted)}
     .hidden { display:none !important; }
     .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; margin-bottom:10px; }
-    .debugOnly { display:none; }
+    .debugOnly { display:none; } /* elements shown only in Debug */
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
@@ -50,10 +50,15 @@
       </div>
 
       <div id="controls" style="margin-top:10px">
-        <button id="togglePreview">عرض المعالجة</button>
-        <button id="snapBtn">فتح Snap</button>
-        <button id="runOnceBtn">جرب مرة واحدة الآن</button>
-        <button id="restartBtn">إعادة محاولة</button>
+        <!-- These action buttons are debug-only per request -->
+        <button id="togglePreview" class="debugOnly">عرض المعالجة</button>
+        <button id="snapBtn" class="debugOnly">فتح Snap</button>
+        <button id="runOnceBtn" class="debugOnly">جرب مرة واحدة الآن</button>
+
+        <!-- Retry button (visible always), renamed to "بجديد" and fixed behavior -->
+        <button id="restartBtn">بجديد</button>
+
+        <!-- copy log visible only in debug -->
         <button id="copyLogBtn" class="hidden debugOnly">نسخ سجل التشغيل</button>
       </div>
 
@@ -63,7 +68,7 @@
         <div id="errorLine"></div>
       </div>
 
-      <div style="margin-top:8px" class="small">ضع السطر/الهوية داخل الإطار الأحمر ثم اضغط "جرب مرة واحدة" أو انتظر المسح التلقائي</div>
+      <div style="margin-top:8px" class="small">ضع السطر/الهوية داخل الإطار الأحمر ثم اضغط "بجديد" لإعادة المحاولة أو فعّل Debug لرؤية أدوات المعالجة</div>
 
       <div style="margin-top:10px" id="roiControls" class="hidden debugOnly">
         <div class="row">
@@ -250,6 +255,11 @@ function appendLog(line){
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
 
+/* ---------- ضبط لون مربع ROI افتراضيا أحمر ---------- */
+(function applyROIColor(){
+  roiBox.style.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#e33';
+})();
+
 /* ---------- كاميرا ---------- */
 async function startCamera(){
   try {
@@ -432,7 +442,6 @@ function extractBarcodeAndID(text){
   const cleaned = (text || '').replace(/\s+/g, '');
   const barcodeMatch = cleaned.match(BARCODE_REGEX);
   let idMatch = null;
-  // البحث عن تسلسلات أرقام مناسبة لاختبارها مقابل تعبير الهوية
   const digitSeqs = (cleaned.match(/\d{10,14}/g) || []);
   for (const seq of digitSeqs){
     if (ID_REGEX.test(seq)){
@@ -547,22 +556,27 @@ async function startLoop(){
 }
 
 /* ---------- UI wiring ---------- */
+/* toggle preview only visible in debug; button exists but hidden unless debug */
 togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
 
 snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
 
 runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
 
+/* Restart ("بجديد") behavior: reset candidates for missing targets and (re)start loop.
+   This fixes previous issue where loop stopped after confirming only one value. */
 restartBtn.addEventListener('click', ()=> {
-  // لا تمسّ النتائج المؤكدة؛ أعد محاولة التقاط الناقص فقط
+  // reset candidates for the values that are not yet confirmed
   if (!foundBarcode) { lastBarcodeCandidate = null; stableBarcodeCount = 0; }
   if (!foundID) { lastIDCandidate = null; stableIDCount = 0; }
   attemptsCount = 0;
   scanning = true;
   setError('');
+  appendLog('Manual retry (بجديد) triggered. Keeping confirmed results if any.');
   if (workerReady && videoReady) startLoop();
 });
 
+/* copy log */
 copyLogBtn.addEventListener('click', async () => {
   try {
     const text = LOG_BUFFER.join('\n') || '';
