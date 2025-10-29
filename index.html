@@ -2,31 +2,34 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Final Single File</title>
+  <title>OCR Tawkeel — Debuggable Single Page</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align:center; padding:12px; }
-    .viewer { position:relative; display:inline-block; }
+    body { font-family: Arial, sans-serif; text-align:center; padding:12px; direction:rtl; }
+    .viewer { position:relative; display:inline-block; margin-top:8px; }
     video { border:2px solid #444; border-radius:8px; background:#000; display:block; max-width:90vw; height:auto; }
-    #roi-box { position:absolute; border:2px dashed red; box-sizing:border-box; pointer-events:none; }
-    #preview-canvas { position:absolute; pointer-events:none; image-rendering:pixelated; border-radius:4px; display:none; }
+    #roi-box { position:absolute; border:2px dashed #e33; box-sizing:border-box; pointer-events:none; }
+    #preview-canvas { position:absolute; pointer-events:none; image-rendering:pixelated; border-radius:4px; display:none; border:1px solid rgba(0,0,0,0.12); background:#fff; }
     #controls { margin-top:12px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
-    #info { margin-top:10px; text-align:left; max-width:920px; margin-left:auto; margin-right:auto; }
+    #info { margin-top:10px; text-align:left; max-width:980px; margin-left:auto; margin-right:auto; }
     .row { display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap; }
-    label { font-size:13px; min-width:70px; }
-    input[type="range"] { width:160px; }
-    pre { background:#f3f3f3; padding:8px; border-radius:6px; overflow:auto; max-height:200px; }
+    label { font-size:13px; min-width:90px; text-align:left; }
+    input[type="range"] { width:180px; }
+    pre { background:#f7f7f7; padding:8px; border-radius:6px; overflow:auto; max-height:240px; white-space:pre-wrap; }
     button { padding:8px 12px; }
-    #result { font-weight:bold; color:green; min-height:20px; }
-    #log { font-size:12px; color:#666; min-height:18px; margin-top:6px; }
+    #result { font-weight:bold; color:green; min-height:22px; }
+    #errorLine { color:#b00; font-weight:bold; min-height:18px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    td, th { border:1px solid #eee; padding:6px; text-align:left; }
+    small.gray { color:#666; }
     @media (max-width:700px) { video { width:360px; height:270px; } }
   </style>
 </head>
 <body>
-  <h3>OCR Tawkeel — Final Single File</h3>
+  <h2>OCR Tawkeel — صفحة تصحيح وتشغيل متقدّم</h2>
 
-  <div id="viewerRoot" class="viewer">
+  <div class="viewer" id="viewerRoot">
     <video id="video" autoplay playsinline muted></video>
     <div id="roi-box" aria-hidden="true"></div>
     <canvas id="preview-canvas"></canvas>
@@ -34,29 +37,82 @@
 
   <div id="controls">
     <button id="togglePreview">عرض المعالجة</button>
-    <button id="snapBtn">اختبار Snap</button>
+    <button id="snapBtn">فتح Snap</button>
     <button id="restartBtn">إعادة محاولة</button>
+    <button id="runOnceBtn">جرب مرة واحدة الآن</button>
   </div>
 
   <div id="info">
-    <div class="row"><div><strong>Result:</strong> <span id="result">Waiting...</span></div><div id="log"></div></div>
-    <div class="row"><label>Raw OCR</label><pre id="raw" style="flex:1">—</pre></div>
-    <div class="row"><label>Words (text : conf)</label><pre id="words" style="flex:1">—</pre></div>
-    <div style="margin-top:10px;"><strong>ضبط ROI</strong></div>
-    <div class="row">
-      X <input id="rX" type="range" min="0" max="100" value="50">
-      Y <input id="rY" type="range" min="0" max="100" value="72">
-      W <input id="rW" type="range" min="50" max="480" value="260">
-      H <input id="rH" type="range" min="20" max="240" value="60">
+    <div class="row"><div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
+      <div id="errorLine"></div>
     </div>
+
+    <div style="margin-top:8px;"><strong>خيارات المعالجة وTesseract</strong></div>
+    <div class="row">
+      <label>PSM</label>
+      <select id="psmSelect">
+        <option value="7">7 - SINGLE_LINE</option>
+        <option value="6">6 - SINGLE_BLOCK</option>
+        <option value="3">3 - SINGLE_COLUMN</option>
+        <option value="11">11 - Sparse text</option>
+      </select>
+
+      <label>Upscale</label>
+      <select id="upscaleSelect">
+        <option value="1">1x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2" selected>2x</option>
+        <option value="3">3x</option>
+      </select>
+
+      <label>Threshold</label>
+      <input id="threshRange" type="range" min="80" max="200" value="140">
+      <span id="threshVal">140</span>
+    </div>
+
+    <div class="row">
+      <label>Sharpen</label>
+      <input id="sharpenRange" type="range" min="0" max="3" step="0.5" value="1.0">
+      <span id="sharpenVal">1.0</span>
+
+      <label>Median blur</label>
+      <input id="medianRange" type="range" min="0" max="2" step="1" value="1">
+      <span id="medianVal">1</span>
+
+      <label>Force Invert</label>
+      <input id="forceInvert" type="checkbox">
+    </div>
+
+    <div style="margin-top:8px;"><strong>ROI Tune</strong> <small class="gray">حرك المربعات حتى يظهر السطر داخل الإطار الأحمر</small></div>
+    <div class="row">
+      <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
+      <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
+      <label>Width px</label><input id="rW" type="range" min="60" max="900" value="260">
+      <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
+    </div>
+
+    <div style="margin-top:10px;"><strong>مخرجات تشخيصية</strong></div>
+    <div class="row">
+      <div style="flex:1">
+        <div><strong>Raw OCR</strong></div>
+        <pre id="raw">—</pre>
+      </div>
+      <div style="flex:1">
+        <div><strong>Words (text : confidence)</strong></div>
+        <pre id="words">—</pre>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;"><strong>سجل التشغيل (تلقى رسائل الخطأ والتقدم هنا)</strong></div>
+    <pre id="log">جاري التهيئة...</pre>
   </div>
 
-  <!-- كانڤاسات معالجة مخفية -->
+  <!-- كانڤاسات مخفية للمعالجة -->
   <canvas id="fullCanvas" style="display:none"></canvas>
-  <canvas id="roiCanvas" width="360" height="80" style="display:none"></canvas>
+  <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* لا تغيّر الـ regex */
+/* ثابت: لا تغيّر هذا النمط */
 const TARGET_REGEX = /ECP\d{8}EG/;
 
 const video = document.getElementById('video');
@@ -64,83 +120,92 @@ const viewerRoot = document.getElementById('viewerRoot');
 const roiBox = document.getElementById('roi-box');
 const previewCanvas = document.getElementById('preview-canvas');
 const previewCtx = previewCanvas.getContext('2d');
-const resultBox = document.getElementById('result');
-const rawBox = document.getElementById('raw');
-const wordsBox = document.getElementById('words');
-const logBox = document.getElementById('log');
-const toggleBtn = document.getElementById('togglePreview');
-const snapBtn = document.getElementById('snapBtn');
-const restartBtn = document.getElementById('restartBtn');
-const rX = document.getElementById('rX');
-const rY = document.getElementById('rY');
-const rW = document.getElementById('rW');
-const rH = document.getElementById('rH');
 const fullCanvas = document.getElementById('fullCanvas');
 const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
 const roiCanvas = document.getElementById('roiCanvas');
 const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
-// حالات التشغيل والمتغيرات
-let ROI = { cxPerc: 50, cyPerc: 72, wPx: 260, hPx: 60 };
+const resultEl = document.getElementById('result');
+const rawEl = document.getElementById('raw');
+const wordsEl = document.getElementById('words');
+const logEl = document.getElementById('log');
+const errorLine = document.getElementById('errorLine');
+
+const togglePreview = document.getElementById('togglePreview');
+const snapBtn = document.getElementById('snapBtn');
+const restartBtn = document.getElementById('restartBtn');
+const runOnceBtn = document.getElementById('runOnceBtn');
+
+const psmSelect = document.getElementById('psmSelect');
+const upscaleSelect = document.getElementById('upscaleSelect');
+const threshRange = document.getElementById('threshRange');
+const threshVal = document.getElementById('threshVal');
+const sharpenRange = document.getElementById('sharpenRange');
+const sharpenVal = document.getElementById('sharpenVal');
+const medianRange = document.getElementById('medianRange');
+const medianVal = document.getElementById('medianVal');
+const forceInvert = document.getElementById('forceInvert');
+
+const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW = document.getElementById('rW'), rH = document.getElementById('rH');
+
+let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null, scanning = true, ocrRunning = false;
 let lastAttempt = 0, lastText = null, stableCount = 0;
-const minInterval = 450, requiredStable = 2;
+const minInterval = 400, requiredStable = 2;
 
-function log(msg){ logBox.innerText = msg; console.log(msg); }
+function appendLog(line){
+  const t = new Date().toLocaleTimeString();
+  logEl.textContent = `[${t}] ${line}\n` + logEl.textContent;
+}
+function setError(msg){ errorLine.textContent = msg || ''; }
 
-// ابدأ الكاميرا
-async function startCamera(){
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+function startCamera(){
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width:{ ideal:1280 }, height:{ ideal:720 } } })
+    .then(s => { video.srcObject = s; appendLog('Camera stream started'); })
+    .catch(e => {
+      appendLog('Camera error: ' + (e && e.message ? e.message : e));
+      setError('خطأ بالكاميرا: ' + (e && e.message ? e.message : e));
     });
-    video.srcObject = stream;
-    log('Camera started');
-  } catch (e) {
-    resultBox.innerText = 'Camera error';
-    log('Camera error: ' + e);
-  }
 }
 
-// تهيئة عامل Tesseract وإعدادات الأداء
+// Initialise Tesseract worker with logger forwarded to page
 (async function initWorker(){
-  worker = Tesseract.createWorker({ logger: m => { /* optional */ } });
-  await worker.load();
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng');
-  await worker.setParameters({
-    tessedit_char_whitelist: 'ECP0123456789EG',
-    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
-    tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY
+  appendLog('تحميل عامل Tesseract...');
+  worker = Tesseract.createWorker({
+    logger: m => {
+      // forward key messages to log area
+      appendLog(`Tesseract: ${m.status} ${(m.progress || '').toString().slice(0,6)}`);
+    }
   });
-  workerReady = true;
-  log('Worker ready');
-  if (videoReady) startLoop();
+  try {
+    await worker.load();
+    appendLog('worker.load OK');
+    await worker.loadLanguage('eng');
+    appendLog('language loaded: eng');
+    await worker.initialize('eng');
+    appendLog('worker initialized');
+    // keep parameters set later before each recognize to allow PSM change
+    workerReady = true;
+    appendLog('Worker ready');
+    if (videoReady) startLoop();
+  } catch (err){
+    appendLog('Worker init error: ' + err);
+    setError('خطأ بتهيئة Tesseract: ' + (err && err.message ? err.message : err));
+  }
 })();
 
-// تحديث قيم ROI من الواجهات
-function updateROIdataFromControls(){
-  ROI.cxPerc = Number(rX.value);
-  ROI.cyPerc = Number(rY.value);
-  ROI.wPx = Number(rW.value);
-  ROI.hPx = Number(rH.value);
-  positionROIBox();
-}
-
-// وضع مربع ROI والـ preview متطابقان
-function positionROIBox(){
+// ROI / preview positioning
+function positionROI(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
-  const boxW = ROI.wPx;
-  const boxH = ROI.hPx;
+  const boxW = ROI.wPx, boxH = ROI.hPx;
   const leftInViewer = Math.round((vRect.width * ROI.cxPerc/100) - boxW/2);
   const topInViewer = Math.round((vRect.height * ROI.cyPerc/100) - boxH/2);
   roiBox.style.width = boxW + 'px';
   roiBox.style.height = boxH + 'px';
   roiBox.style.left = (leftInViewer + (vRect.left - rootRect.left)) + 'px';
   roiBox.style.top = (topInViewer + (vRect.top - rootRect.top)) + 'px';
-  // مزامنة preview
   previewCanvas.style.left = roiBox.style.left;
   previewCanvas.style.top = roiBox.style.top;
   previewCanvas.style.width = boxW + 'px';
@@ -149,7 +214,7 @@ function positionROIBox(){
   previewCanvas.height = boxH;
 }
 
-// تحويل إحداثيات العرض إلى إحداثيات الصورة بدقة الفيديو الحقيقية
+// compute ROI in fullCanvas coordinates
 function computeROIforCapture(){
   const vRect = video.getBoundingClientRect();
   const vw = vRect.width, vh = vRect.height;
@@ -165,42 +230,17 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-// دالة المعالجة النهائية للـ ROI: upscale ×2, sharpen, median blur, threshold, auto invert
-async function prepareROIBlob(){
-  // ارسم فريم الفيديو على fullCanvas
-  fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-  const { sx, sy, sw, sh } = computeROIforCapture();
-
-  // حماية حدود القطع
-  const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
-  const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
-  const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
-  const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
-
-  // upscale factor لتحسين دقة Tesseract
-  const factor = 2;
-  const targetW = Math.max(200, Math.round(previewCanvas.width * factor));
-  const targetH = Math.max(40, Math.round(previewCanvas.height * factor));
-  roiCanvas.width = targetW;
-  roiCanvas.height = targetH;
-  roiCtx.clearRect(0,0,targetW,targetH);
-  roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
-
-  // احصل على بيانات الصورة
-  const img = roiCtx.getImageData(0,0,targetW,targetH);
-  const data = img.data;
-  const w = targetW, h = targetH;
-
-  // 1) grayscale + contrast
-  const contrastFactor = 1.6;
+// image processing helpers
+function grayscaleContrast(data, contrastFactor){
   const intercept = 128 * (1 - contrastFactor);
-  for (let i = 0; i < data.length; i += 4) {
+  for (let i = 0; i < data.length; i += 4){
     const g = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
     let v = g * contrastFactor + intercept;
     data[i] = data[i+1] = data[i+2] = v;
   }
-
-  // 2) sharpen kernel 3x3 (using copy)
+}
+function sharpen(data, w, h, amount){
+  if (!amount || amount <= 0) return;
   const copy = new Uint8ClampedArray(data);
   for (let y = 1; y < h-1; y++){
     for (let x = 1; x < w-1; x++){
@@ -210,163 +250,279 @@ async function prepareROIBlob(){
       const down = copy[((y+1)*w + x)*4];
       const left = copy[(y*w + (x-1))*4];
       const right = copy[(y*w + (x+1))*4];
-      let v = 5*center - up - down - left - right;
+      let v = (1 + amount*4)*center - amount*(up + down + left + right);
       v = Math.max(0, Math.min(255, v));
       data[idx] = data[idx+1] = data[idx+2] = v;
     }
   }
-
-  // 3) median blur 3x3
-  const tmp = new Uint8ClampedArray(data);
-  for (let y = 1; y < h-1; y++){
-    for (let x = 1; x < w-1; x++){
-      const vals = [];
-      for (let yy=-1; yy<=1; yy++){
-        for (let xx=-1; xx<=1; xx++){
-          const id = ((y+yy)*w + (x+xx))*4;
-          vals.push(tmp[id]);
+}
+function medianBlur(data, w, h, passes){
+  if (!passes || passes <= 0) return;
+  for (let p=0; p<passes; p++){
+    const copy = new Uint8ClampedArray(data);
+    for (let y = 1; y < h-1; y++){
+      for (let x = 1; x < w-1; x++){
+        const vals = [];
+        for (let yy=-1; yy<=1; yy++){
+          for (let xx=-1; xx<=1; xx++){
+            const id = ((y+yy)*w + (x+xx))*4;
+            vals.push(copy[id]);
+          }
         }
+        vals.sort((a,b)=>a-b);
+        const med = vals[4];
+        const idc = (y*w + x)*4;
+        data[idc] = data[idc+1] = data[idc+2] = med;
       }
-      vals.sort((a,b)=>a-b);
-      const med = vals[4];
-      const idc = (y*w + x)*4;
-      data[idc] = data[idc+1] = data[idc+2] = med;
     }
   }
-
-  // 4) threshold ثابت
-  const thresh = 140;
+}
+function thresholdBinary(data, t){
   let whiteCount = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const v = data[i] > thresh ? 255 : 0;
-    data[i] = data[i+1] = data[i+2] = v;
-    if (v === 255) whiteCount++;
+  for (let i=0;i<data.length;i+=4){
+    const v = data[i] > t ? 255:0;
+    data[i]=data[i+1]=data[i+2]=v;
+    if (v===255) whiteCount++;
   }
+  return whiteCount;
+}
+function invertColors(data){ for (let i=0;i<data.length;i+=4){ const v = 255 - data[i]; data[i]=data[i+1]=data[i+2]=v; } }
 
-  // 5) auto invert if necessary (make dark text on light bg -> invert to light text on dark bg for LSTM)
-  const whiteRatio = whiteCount / (data.length / 4);
-  if (whiteRatio < 0.5) {
-    // background dark, keep as-is (white text on dark bg)
-    // For our case we want white text -> invert so Tesseract sees dark text on light bg
-    for (let i = 0; i < data.length; i += 4) {
-      const v = 255 - data[i];
-      data[i] = data[i+1] = data[i+2] = v;
+// prepare blob with tunables and diagnostics
+async function prepareROIBlob(){
+  try {
+    fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
+  } catch (e){
+    appendLog('خطأ أثناء رسم الفريم: ' + e);
+    setError('خطأ رسم الفريم: ' + (e && e.message ? e.message : e));
+    return null;
+  }
+  const { sx, sy, sw, sh, dstW, dstH } = computeROIforCapture();
+  if (sw <= 0 || sh <= 0){ appendLog('ROI خارج الإطار'); setError('ROI غير داخل إطار الفيديو'); return null; }
+
+  // upscale factor from select
+  const factor = Number(upscaleSelect.value) || 2;
+  const targetW = Math.max(120, Math.round(dstW * factor));
+  const targetH = Math.max(24, Math.round(dstH * factor));
+  roiCanvas.width = targetW;
+  roiCanvas.height = targetH;
+  roiCtx.clearRect(0,0,targetW,targetH);
+
+  // safe bounds
+  const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
+  const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
+  const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
+  const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
+
+  // draw cropped resized ROI
+  roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
+
+  // extract image data
+  let img;
+  try { img = roiCtx.getImageData(0,0,targetW,targetH); }
+  catch (e){ appendLog('getImageData failed: ' + e); setError('getImageData failed: ' + (e && e.message ? e.message : e)); return null; }
+  const data = img.data;
+
+  // processing pipeline adjustable
+  const contrastFactor = 1.6;
+  grayscaleContrast(data, contrastFactor);
+
+  const sharpenAmount = Number(sharpenRange.value) || 0;
+  if (sharpenAmount > 0) sharpen(data, targetW, targetH, sharpenAmount);
+
+  const medianPasses = Number(medianRange.value) || 0;
+  if (medianPasses > 0) medianBlur(data, targetW, targetH, medianPasses);
+
+  const thresh = Number(threshRange.value) || 140;
+  const whiteCount = thresholdBinary(data, thresh);
+
+  // auto invert logic: if majority is white (background white), invert to dark text on light bg as Tesseract prefers
+  const whiteRatio = whiteCount / (data.length/4);
+  const force = forceInvert.checked;
+  if (force){
+    invertColors(data);
+    appendLog('Force invert applied');
+  } else {
+    // heuristic: if whiteRatio > 0.8 then background mostly white -> keep; if whiteRatio < 0.5 -> invert to make dark text on light bg
+    if (whiteRatio < 0.5){
+      invertColors(data);
+      appendLog('Auto invert applied (whiteRatio=' + whiteRatio.toFixed(2) + ')');
+    } else {
+      appendLog('No invert (whiteRatio=' + whiteRatio.toFixed(2) + ')');
     }
   }
 
+  // put processed data back
   roiCtx.putImageData(img, 0, 0);
 
-  // عرض preview إن مفعل
-  if (showPreview) {
-    previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
-    previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+  // show preview scaled to visual ROI
+  if (showPreview){
+    try {
+      previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+      previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+    } catch(e){ appendLog('preview draw error: ' + e); }
+
+    previewCanvas.style.display = 'block';
   }
 
-  // إرجاع blob
+  // final sanity: check blob size
   return new Promise(resolve => {
     roiCanvas.toBlob(b => {
-      if (!b || b.size < 200) resolve(null); else resolve(b);
+      if (!b){ appendLog('toBlob returned null'); resolve(null); }
+      else if (b.size < 150) { appendLog('blob too small: ' + b.size); resolve(null); }
+      else resolve(b);
     }, 'image/png');
   });
 }
 
-// منطق OCR مع إظهار النتائج التشخيصية
-async function doOCR(){
-  if (!workerReady || !videoReady) return;
-  if (ocrRunning) return;
-  const now = Date.now();
-  if (now - lastAttempt < minInterval) return;
-  lastAttempt = now;
-  ocrRunning = true;
+// perform OCR with current PSM and whitelist, and show diagnostics/errors live
+async function doOCROnce(){
+  setError('');
+  rawEl.textContent = '—'; wordsEl.textContent = '—';
+  if (!workerReady) { setError('عامل Tesseract غير جاهز'); appendLog('Worker not ready'); return; }
+  if (!videoReady) { setError('الكاميرا غير جاهزة'); appendLog('Video not ready'); return; }
+  const blob = await prepareROIBlob();
+  if (!blob){ setError('الصورة المعالجة فارغة أو صغيرة — راجع ROI/الإضاءة/الإعدادات'); return; }
+
+  // set parameters per attempt (allow PSM change)
+  const psm = Number(psmSelect.value);
   try {
-    const blob = await prepareROIBlob();
-    if (!blob) { resultBox.innerText = 'Preview empty - اضبط ROI أو الإضاءة'; ocrRunning=false; return; }
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ECP0123456789EG',
+      tessedit_pageseg_mode: psm,
+      tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY
+    });
+  } catch(e){ appendLog('setParameters error: ' + e); }
+
+  appendLog('بدء recognize (PSM=' + psm + ') ...');
+  try {
     const { data } = await worker.recognize(blob);
-    const text = (data && data.text) ? data.text : '';
-    rawBox.textContent = text || '—';
+    rawEl.textContent = data && data.text ? data.text : '';
     if (data && data.words && data.words.length){
       const lines = data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`);
-      wordsBox.textContent = lines.join('\n');
-    } else {
-      wordsBox.textContent = '—';
-    }
-    const cleaned = text.replace(/\s+/g,'');
-    const match = cleaned.match(TARGET_REGEX); // الريجيكس كما طلبت
+      wordsEl.textContent = lines.join('\n');
+    } else { wordsEl.textContent = '—'; }
+    appendLog('recognize done, OCR text length: ' + (data && data.text ? data.text.length : 0));
+    // cleaning and matching regex exactly as requested
+    const cleaned = (data && data.text ? data.text.replace(/\s+/g,'') : '');
+    const match = cleaned.match(TARGET_REGEX);
     if (match){
-      const candidate = match[0];
-      if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
-      if (stableCount >= requiredStable){ resultBox.innerText = '✅ Detected: ' + candidate; scanning=false; }
-      else resultBox.innerText = 'Confirming: ' + candidate + ' ('+stableCount+'/'+requiredStable+')';
+      resultEl.textContent = match[0];
+      appendLog('MATCH: ' + match[0]);
+      return match[0];
     } else {
-      lastText = null; stableCount = 0; resultBox.innerText = 'Waiting...';
+      appendLog('No regex match. Cleaned text: "' + cleaned + '"');
+      setError('لم يتم إيجاد تطابق بالنمط — جرّب PSM أو تعديل Threshold/Invert');
+      return null;
     }
   } catch (e){
-    console.error(e);
-    resultBox.innerText = 'OCR error';
-    log('OCR error: ' + (e && e.message ? e.message : e));
-  } finally { ocrRunning=false; }
-}
-
-// حلقة المسح الهادئة
-let raf = null;
-function startLoop(){
-  if (raf) return;
-  scanning = true;
-  resultBox.innerText = 'Waiting...';
-  function step(){
-    if (!scanning){ cancelAnimationFrame(raf); raf = null; return; }
-    doOCR();
-    raf = requestAnimationFrame(step);
+    appendLog('recognize error: ' + e);
+    setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e));
+    throw e;
   }
-  raf = requestAnimationFrame(step);
 }
 
-// واجهات المستخدم: أزرار، منزلقات
-toggleBtn.addEventListener('click', () => {
+// repeated attempt loop with throttling and stability check
+async function startLoop(){
+  if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
+  scanning = true; resultEl.textContent = 'Waiting...'; setError('');
+  while (scanning){
+    const now = Date.now();
+    if (now - lastAttempt < minInterval){ await new Promise(r=>setTimeout(r, minInterval)); continue; }
+    lastAttempt = now;
+    try {
+      const res = await doOCROnce();
+      if (res){
+        // stable check
+        if (res === lastText) stableCount++; else { lastText = res; stableCount = 1; }
+        appendLog('Stable count: ' + stableCount);
+        if (stableCount >= requiredStable){
+          resultEl.textContent = res;
+          appendLog('Finalized: ' + res);
+          scanning = false;
+          break;
+        }
+      } else {
+        lastText = null; stableCount = 0;
+      }
+    } catch(e){
+      appendLog('Loop error: ' + e);
+      // continue but allow user to see error
+      await new Promise(r=>setTimeout(r, 500));
+    }
+    await new Promise(r=>setTimeout(r, 200)); // small pause
+  }
+}
+
+// UI wiring
+togglePreview.addEventListener('click', () => {
   showPreview = !showPreview;
   previewCanvas.style.display = showPreview ? 'block' : 'none';
-  toggleBtn.innerText = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
+  togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
+  positionROI();
 });
 
 snapBtn.addEventListener('click', async () => {
-  const blob = await prepareROIBlob();
-  if (!blob) { alert('Preview empty or too small'); return; }
-  window.open(URL.createObjectURL(blob), '_blank');
+  const b = await prepareROIBlob();
+  if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; }
+  window.open(URL.createObjectURL(b), '_blank');
 });
 
 restartBtn.addEventListener('click', () => {
-  scanning = true; lastText = null; stableCount = 0; resultBox.innerText = 'Waiting...';
+  scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError('');
   if (workerReady && videoReady) startLoop();
 });
 
-[rX,rY,rW,rH].forEach(control => control.addEventListener('input', updateROIdataFromControls));
-function updateROIdataFromControls(){
+runOnceBtn.addEventListener('click', async () => {
+  try {
+    await doOCROnce();
+  } catch(e){
+    appendLog('runOnce error: ' + e);
+  }
+});
+
+psmSelect.addEventListener('change', () => appendLog('PSM changed to ' + psmSelect.value));
+upscaleSelect.addEventListener('change', () => appendLog('Upscale set to ' + upscaleSelect.value));
+threshRange.addEventListener('input', ()=> { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
+sharpenRange.addEventListener('input', ()=> { sharpenVal.textContent = sharpenRange.value; });
+medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange.value; });
+[rX,rY,rW,rH].forEach(el => el.addEventListener('input', () => {
   ROI.cxPerc = Number(rX.value);
   ROI.cyPerc = Number(rY.value);
   ROI.wPx = Number(rW.value);
   ROI.hPx = Number(rH.value);
-  positionROIBox();
-}
+  positionROI();
+}));
 
-// عندما تكون بيانات الفيديو جاهزة
+// when video ready
 video.addEventListener('loadedmetadata', () => {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
-  const maxW = Math.min(900, window.innerWidth - 40);
+  const maxW = Math.min(980, window.innerWidth - 40);
   video.style.width = maxW + 'px';
   video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
+  // init UI values
   rX.value = ROI.cxPerc; rY.value = ROI.cyPerc; rW.value = ROI.wPx; rH.value = ROI.hPx;
-  updateROIdataFromControls();
+  positionROI();
   videoReady = true;
-  log('Video ready');
+  appendLog('Video ready (metadata)');
   if (workerReady) startLoop();
 });
 
-// ابدأ الكاميرا فور التحميل
+// start camera
 startCamera();
 
-// تنظيف العامل عند الخروج
-window.addEventListener('beforeunload', async () => { if (worker) await worker.terminate(); });
+// error and progress visible initially
+appendLog('Page loaded. انتظر تحضير العامل والكاميرا...');
+threshVal.textContent = threshRange.value;
+sharpenVal.textContent = sharpenRange.value;
+medianVal.textContent = medianRange.value;
+
+// cleanup on unload
+window.addEventListener('beforeunload', async () => {
+  try { if (worker) await worker.terminate(); }
+  catch(e){ /* ignore */ }
+});
 </script>
 </body>
 </html>
