@@ -2,101 +2,120 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel Reliable Scanner</title>
+  <title>OCR Tawkeel - Fixed</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; text-align:center; padding:16px; }
+    body { font-family: Arial, sans-serif; text-align:center; padding:12px; }
     .viewer { position:relative; display:inline-block; }
-    video { border:2px solid #444; border-radius:8px; background:#000; }
-    #roi-box { position:absolute; border:2px dashed red; width:250px; height:60px; top:320px; left: calc(50% - 125px); pointer-events:none; box-sizing:border-box; }
-    #result { font-size:20px; font-weight:bold; color:green; margin-top:12px; min-height:28px; }
+    video { border:2px solid #444; border-radius:8px; background:#000; width:640px; height:480px; object-fit:cover; }
+    #roi-box { position:absolute; width:250px; height:60px; border:2px dashed red; left:50%; transform:translateX(-50%); top:320px; box-sizing:border-box; pointer-events:none; }
+    /* preview canvas سيجلس تماماً داخل مربع الـ ROI */
+    #preview-overlay { position:absolute; left:50%; transform:translateX(-50%); top:320px; width:250px; height:60px; pointer-events:none; display:none; image-rendering:pixelated; }
     #controls { margin-top:12px; }
-    button { margin:0 6px; padding:6px 12px; }
-    /* preview داخل نفس مربع ROI ليبيّن ما يُرسل للـ OCR */
-    #previewOverlay { position:absolute; top:0; left:0; pointer-events:none; display:none; }
+    #result { font-weight:bold; color:green; min-height:26px; margin-top:10px; }
+    button { padding:8px 12px; margin:0 6px; }
+    @media (max-width:700px) {
+      video { width:360px; height:270px; }
+      #roi-box, #preview-overlay { width:200px; height:48px; top:200px; }
+    }
   </style>
 </head>
 <body>
-  <h3>OCR Tawkeel Reliable Scanner</h3>
+  <h3>OCR Tawkeel — Fixed Reliable Version</h3>
 
   <div class="viewer" id="viewer">
-    <video id="video" autoplay playsinline width="640" height="480"></video>
-    <div id="roi-box"></div>
-    <canvas id="previewOverlay" width="250" height="60"></canvas>
+    <video id="video" autoplay playsinline></video>
+    <div id="roi-box" aria-hidden="true"></div>
+    <canvas id="preview-overlay"></canvas>
   </div>
 
-  <!-- كانڤاس خلفي للرسم الكامل (مخفي) وكانڤاس ROI مُصغّر -->
-  <canvas id="canvas" width="640" height="480" style="display:none"></canvas>
-  <canvas id="roiCanvas" width="360" height="80" style="display:none"></canvas>
+  <div id="controls">
+    <button id="togglePreview">عرض المعالجة</button>
+    <button id="restartBtn">🔄 إعادة المحاولة</button>
+  </div>
 
   <div id="result">Waiting...</div>
-  <div id="controls">
-    <button id="restartBtn">🔄 إعادة المحاولة</button>
-    <button id="togglePreviewBtn">عرض المعالجة</button>
-  </div>
+
+  <!-- خلفية للمعالجة (مخفية) -->
+  <canvas id="fullCanvas" width="640" height="480" style="display:none"></canvas>
+  <canvas id="roiCanvas" width="360" height="80" style="display:none"></canvas>
 
 <script>
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const roiCanvas = document.getElementById('roiCanvas');
-  const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
-  const previewOverlay = document.getElementById('previewOverlay');
-  const previewCtx = previewOverlay.getContext('2d');
-  const viewer = document.getElementById('viewer');
-  const roiBox = document.getElementById('roi-box');
-  const resultBox = document.getElementById('result');
-  const restartBtn = document.getElementById('restartBtn');
-  const togglePreviewBtn = document.getElementById('togglePreviewBtn');
-
-  // احتفظ بنفس regex الخاص بك دون تغيير
+  // ثبّت الريجيكس كما طلبت
   const TARGET_REGEX = /ECP\d{8}EG/;
 
-  // اضبط ROI هنا ليتطابق مع موقع السطر تحت الباركود في كاميرتك
-  const ROI = { x: 200, y: 320, w: 250, h: 60 }; // عدّل X, Y حسب الحاجة
+  const video = document.getElementById('video');
+  const preview = document.getElementById('preview-overlay');
+  const previewCtx = preview.getContext('2d');
+  const roiBox = document.getElementById('roi-box');
+  const resultBox = document.getElementById('result');
+  const toggleBtn = document.getElementById('togglePreview');
+  const restartBtn = document.getElementById('restartBtn');
 
-  // مواصفات الأداء والسلوك
+  const fullCanvas = document.getElementById('fullCanvas');
+  const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
+  const roiCanvas = document.getElementById('roiCanvas');
+  const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
+
+  // ROI افتراضي (نسبة مئوية ستُحوَّل إلى بكسل بعد معرفة أبعاد الفيديو)
+  const ROI_RATIO = { x: 200/640, y: 320/480, w: 250/640, h: 60/480 };
+
+  let roiPx = { x:0,y:0,w:0,h:0 };
+  let showPreview = false;
   let scanning = true;
   let ocrRunning = false;
   let workerReady = false;
+  let videoReady = false;
   let lastAttempt = 0;
   const minInterval = 500;
   const requiredStable = 2;
   let lastText = null;
   let stableCount = 0;
-  let showPreview = false;
+  let worker = null;
 
-  // مزامنة عرض الـ preview داخل مربع ROI
-  function syncPreviewPosition() {
-    // تحديد ابعاد المربع الأحمر (roiBox) بالنسبة للـ viewer
-    const vb = viewer.getBoundingClientRect();
-    const rb = roiBox.getBoundingClientRect();
-    // ضبط مقاس الـ previewOverlay لكي يكون فوق المربع الأحمر
-    previewOverlay.style.display = showPreview ? 'block' : 'none';
-    previewOverlay.style.left = (rb.left - vb.left) + 'px';
-    previewOverlay.style.top = (rb.top - vb.top) + 'px';
-    previewOverlay.width = rb.width;
-    previewOverlay.height = rb.height;
+  // تهيئة الكاميرا
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+    } catch (err) {
+      resultBox.innerText = 'Camera error: ' + err.message;
+    }
   }
 
-  togglePreviewBtn.addEventListener('click', () => {
-    showPreview = !showPreview;
-    togglePreviewBtn.innerText = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
-    syncPreviewPosition();
-  });
+  // تحويل نسب ROI إلى بكسل عرض الفيديو المعروض
+  function computeROIPixels() {
+    const displayW = video.clientWidth;
+    const displayH = video.clientHeight;
+    // حساب مركزية المربع كما في CSS (left:50% translateX(-50%))
+    const roiW = Math.round(displayW * ROI_RATIO.w);
+    const roiH = Math.round(displayH * ROI_RATIO.h);
+    const roiX = Math.round((displayW * ROI_RATIO.x));
+    const roiY = Math.round((displayH * ROI_RATIO.y));
+    // تحديث موضع المربع الحقيقي على الكانڤاس الذي نستخدمه (fullCanvas يستخدم أبعاد الفيديو الباطنية 640x480)
+    // سنحوّل من إحداثيات العرض إلى إحداثيات الفيديو الطبيعية (fullCanvas.width/fullCanvas.clientWidth)
+    const scaleX = fullCanvas.width / displayW;
+    const scaleY = fullCanvas.height / displayH;
+    roiPx = {
+      x: Math.max(0, Math.min(fullCanvas.width-1, Math.round(roiX * scaleX))),
+      y: Math.max(0, Math.min(fullCanvas.height-1, Math.round(roiY * scaleY))),
+      w: Math.max(1, Math.min(fullCanvas.width, Math.round(roiW * scaleX))),
+      h: Math.max(1, Math.min(fullCanvas.height, Math.round(roiH * scaleY)))
+    };
+    // مزامنة عنصر ال preview مع المربع الظاهر
+    preview.style.width = (roiW) + 'px';
+    preview.style.height = (roiH) + 'px';
+    preview.style.left = '50%';
+    preview.style.transform = 'translateX(-50%)';
+    preview.style.top = roiBox.style.top;
+    preview.width = roiW;
+    preview.height = roiH;
+  }
 
-  window.addEventListener('resize', syncPreviewPosition);
-  // تأكد أن المربع الأحمر موقّع نسبياً داخل viewer (CSS أعلاه يضمن ذلك)
-
-  // تشغيل الكاميرا
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-    .then(s => { video.srcObject = s; })
-    .catch(e => { resultBox.innerText = "Camera error: " + e; });
-
-  // تهيئة worker وانتظار الجاهزية قبل البدء
-  let worker;
-  (async () => {
-    worker = Tesseract.createWorker({ logger: m => { /* console.log(m) */ } });
+  // تهيئة worker وإعداداته
+  (async function initWorker(){
+    worker = Tesseract.createWorker({ logger: m => {/* optionally console.log(m) */} });
     await worker.load();
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
@@ -106,35 +125,59 @@
       tessedit_ocr_engine_mode: Tesseract.OEM.LSTM_ONLY
     });
     workerReady = true;
-    // إذا الفيديو جاهز أيضاً، نبدأ الحلقة
-    if (!video.paused && !video.ended) startLoop();
+    // ابدأ اللوب إذا الفيديو جاهز
+    if (videoReady) startLoop();
   })();
 
-  // ننتظر حدث playing لضمان أبعاد الفيديو جاهزة
+  // اجعل الـ toggle يعمل ويظهر preview داخل المربع
+  toggleBtn.addEventListener('click', () => {
+    showPreview = !showPreview;
+    preview.style.display = showPreview ? 'block' : 'none';
+    toggleBtn.innerText = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
+  });
+
+  restartBtn.addEventListener('click', () => {
+    scanning = true;
+    lastText = null;
+    stableCount = 0;
+    resultBox.innerText = 'Waiting...';
+    if (workerReady && videoReady) startLoop();
+  });
+
+  // عندما يبدأ الفيديو: اضبط أحجام الكانڤاسات و حساب ROI البكسلي
+  video.addEventListener('loadedmetadata', () => {
+    // اضبط fullCanvas ليطابق دقة الفيديو الحقيقية (أو احتفظ بـ 640x480)
+    fullCanvas.width = video.videoWidth || 640;
+    fullCanvas.height = video.videoHeight || 480;
+    video.style.width = Math.min(640, window.innerWidth - 40) + 'px';
+    video.style.height = (video.clientWidth * (fullCanvas.height / fullCanvas.width)) + 'px';
+    computeROIPixels();
+  });
+
   video.addEventListener('playing', () => {
-    // مزامنة موضع الـ preview مع المربع الأحمر (بما أن أبعاد الفيديو جاهزة الآن)
-    syncPreviewPosition();
+    videoReady = true;
+    computeROIPixels();
     if (workerReady) startLoop();
   });
 
-  // تحضير الـ ROI: قصّ، تغيير حجم، grayscale، contrast، threshold
+  // تجهيز ROI: crop من fullCanvas إلى roiCanvas مع معالجة بسيطة ثم إرجاع blob
   function prepareROIBlob() {
-    // رسم فريم الفيديو على الكانڤاس الكامل
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // ارسم الفريم الحالي من الفيديو إلى fullCanvas
+    fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
 
-    // قص الـ ROI ورسمه على roiCanvas بحجم مصغّر
-    const targetW = roiCanvas.width;
-    const targetH = roiCanvas.height;
+    // أمان: تأكد أن ROI داخل الحدود
+    const sx = Math.max(0, Math.min(fullCanvas.width - 1, roiPx.x));
+    const sy = Math.max(0, Math.min(fullCanvas.height - 1, roiPx.y));
+    const sw = Math.max(1, Math.min(roiPx.w, fullCanvas.width - sx));
+    const sh = Math.max(1, Math.min(roiPx.h, fullCanvas.height - sy));
+
+    // ارسم إلى roiCanvas (حجم roiCanvas ثابت لتقليل البكسلات المرسلة)
+    const targetW = roiCanvas.width; // 360
+    const targetH = roiCanvas.height; // 80
     roiCtx.clearRect(0,0,targetW,targetH);
-    // تأكد من عدم الخروج عن حدود الكانڤاس
-    const sx = Math.max(0, Math.min(canvas.width - 1, ROI.x));
-    const sy = Math.max(0, Math.min(canvas.height - 1, ROI.y));
-    const sw = Math.max(1, Math.min(ROI.w, canvas.width - sx));
-    const sh = Math.max(1, Math.min(ROI.h, canvas.height - sy));
+    roiCtx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-    roiCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, targetW, targetH);
-
-    // معالجة الصورة: grayscale -> contrast -> threshold (ثابت بعد تحسين)
+    // معالجة بسيطة: grayscale -> contrast -> threshold
     const img = roiCtx.getImageData(0,0,targetW,targetH);
     const data = img.data;
     const contrast = 1.5;
@@ -151,26 +194,21 @@
     }
     roiCtx.putImageData(img, 0, 0);
 
-    // عرض الـ preview داخل المربع الأحمر (متمركز ومقاس مطابق)
+    // ارسم المعالجة على preview (بشرط أن preview ظاهر)
     if (showPreview) {
-      previewCtx.clearRect(0,0,previewOverlay.width, previewOverlay.height);
-      // ارسم نسخة من roiCanvas على preview (تكييف الأبعاد تلقائياً)
-      previewCtx.drawImage(roiCanvas, 0, 0, previewOverlay.width, previewOverlay.height);
+      // نرسم نسخة بأبعاد preview.width/height مباشرة
+      previewCtx.clearRect(0,0,preview.width, preview.height);
+      previewCtx.drawImage(roiCanvas, 0, 0, preview.width, preview.height);
     }
 
-    // إرجاع blob بعد التحقق من أن المحتوى ليس فارغاً
     return new Promise(resolve => {
-      roiCanvas.toBlob(blob => {
-        // فحص بسيط لحجم الـ blob لمنع إرسال صور فارغة
-        if (!blob || blob.size < 200) {
-          resolve(null);
-        } else {
-          resolve(blob);
-        }
+      roiCanvas.toBlob(b => {
+        if (!b || b.size < 200) resolve(null); else resolve(b);
       }, 'image/png');
     });
   }
 
+  // دالة OCR مع منطق الاستقرار والـ regex كما هو
   async function doOCR() {
     if (!scanning || ocrRunning || !workerReady) return;
     const now = Date.now();
@@ -180,90 +218,56 @@
     try {
       const blob = await prepareROIBlob();
       if (!blob) {
-        // blob غير صالح => لا نرسل للـ worker
-        resultBox.innerText = "Preview empty or too small, adjust ROI";
+        resultBox.innerText = 'Preview empty - اضبط المربع الأحمر';
         ocrRunning = false;
         return;
       }
       const { data: { text } } = await worker.recognize(blob);
       const cleaned = (text || '').replace(/\s+/g, '');
-      const match = cleaned.match(TARGET_REGEX); // استخدمت الريجيكس كما هو تماماً
-
+      const match = cleaned.match(TARGET_REGEX); // استخدمنا الريجيكس الخاص بك كما هو
       if (match) {
         const candidate = match[0];
-        if (candidate === lastText) {
-          stableCount++;
-        } else {
-          lastText = candidate;
-          stableCount = 1;
-        }
+        if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
         if (stableCount >= requiredStable) {
-          resultBox.innerText = "✅ Detected: " + candidate;
+          resultBox.innerText = '✅ Detected: ' + candidate;
           scanning = false;
         } else {
-          resultBox.innerText = "Confirming: " + candidate + " (" + stableCount + "/" + requiredStable + ")";
+          resultBox.innerText = 'Confirming: ' + candidate + ' (' + stableCount + '/' + requiredStable + ')';
         }
       } else {
         lastText = null;
         stableCount = 0;
-        resultBox.innerText = "Waiting...";
+        resultBox.innerText = 'Waiting...';
       }
     } catch (err) {
-      console.error('OCR error', err);
-      resultBox.innerText = "OCR error";
+      console.error(err);
+      resultBox.innerText = 'OCR error';
     } finally {
       ocrRunning = false;
     }
   }
 
-  // حلقة رئيسية: تعمل فقط إذا الفيديو يُشغّل والـ worker جاهز
-  let loopRunning = false;
+  // حلقة تحكم بسيطة
+  let loopId = null;
   function startLoop() {
-    if (loopRunning) return;
-    loopRunning = true;
+    if (loopId) return;
     scanning = true;
-    resultBox.innerText = "Waiting...";
-    function frame() {
-      if (!scanning) { loopRunning = false; return; }
+    resultBox.innerText = 'Waiting...';
+    function step() {
+      if (!scanning) { cancelAnimationFrame(loopId); loopId = null; return; }
       doOCR();
-      requestAnimationFrame(frame);
+      loopId = requestAnimationFrame(step);
     }
-    requestAnimationFrame(frame);
+    loopId = requestAnimationFrame(step);
   }
 
-  restartBtn.addEventListener('click', () => {
-    scanning = true;
-    lastText = null;
-    stableCount = 0;
-    resultBox.innerText = "Waiting...";
-    if (workerReady && !video.paused) startLoop();
-  });
-
-  // تنظيف عند الخروج
+  // تنظيف worker عند الخروج
   window.addEventListener('beforeunload', async () => {
     if (worker) await worker.terminate();
   });
 
-  // ضبط موضع المربع الأحمر عملياً بالنسبة لأبعاد الفيديو المعروضة
-  // (يسمح بتعديل بسيط تلقائي حسب عرض الفيديو)
-  function autoAlignROI() {
-    const vw = video.videoWidth || 640;
-    const vh = video.videoHeight || 480;
-    const displayW = video.clientWidth;
-    const displayH = video.clientHeight;
-    // إذا لا نملك أبعاد الفيديو الحقيقية استعمل الافتراضي
-    // هنا نركّز على بقاء ROI ضمن إطار الفيديو المعروض
-    const centerX = Math.floor(displayW / 2 - ROI.w / 2);
-    roiBox.style.left = centerX + 'px';
-    // أعلى-يسار: استخدم ROI.y كنقطة تقريبية عمودية
-    roiBox.style.top = (ROI.y * (displayH / vh)) + 'px';
-    syncPreviewPosition();
-  }
-
-  // حاول محاذاة تلقائياً بعد تشغيل الفيديو
-  video.addEventListener('loadedmetadata', autoAlignROI);
-  video.addEventListener('play', autoAlignROI);
-
+  // ابدأ الكاميرا فور تحميل الصفحة
+  startCamera();
 </script>
 </body>
 </html>
