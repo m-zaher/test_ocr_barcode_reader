@@ -2,7 +2,7 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Final Improved</title>
+  <title>OCR Tawkeel — Final Single File</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
@@ -15,18 +15,16 @@
     #info { margin-top:10px; text-align:left; max-width:920px; margin-left:auto; margin-right:auto; }
     .row { display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap; }
     label { font-size:13px; min-width:70px; }
-    input[type="range"] { width:180px; }
+    input[type="range"] { width:160px; }
     pre { background:#f3f3f3; padding:8px; border-radius:6px; overflow:auto; max-height:200px; }
     button { padding:8px 12px; }
     #result { font-weight:bold; color:green; min-height:20px; }
     #log { font-size:12px; color:#666; min-height:18px; margin-top:6px; }
-    @media (max-width:700px) {
-      video { width:360px; height:270px; }
-    }
+    @media (max-width:700px) { video { width:360px; height:270px; } }
   </style>
 </head>
 <body>
-  <h3>OCR Tawkeel — Final Improved</h3>
+  <h3>OCR Tawkeel — Final Single File</h3>
 
   <div id="viewerRoot" class="viewer">
     <video id="video" autoplay playsinline muted></video>
@@ -41,27 +39,15 @@
   </div>
 
   <div id="info">
+    <div class="row"><div><strong>Result:</strong> <span id="result">Waiting...</span></div><div id="log"></div></div>
+    <div class="row"><label>Raw OCR</label><pre id="raw" style="flex:1">—</pre></div>
+    <div class="row"><label>Words (text : conf)</label><pre id="words" style="flex:1">—</pre></div>
+    <div style="margin-top:10px;"><strong>ضبط ROI</strong></div>
     <div class="row">
-      <div><strong>Result:</strong> <span id="result">Waiting...</span></div>
-      <div id="log"></div>
-    </div>
-
-    <div class="row">
-      <label>Raw OCR</label>
-      <pre id="raw" style="flex:1">—</pre>
-    </div>
-
-    <div class="row">
-      <label>Words (text : conf)</label>
-      <pre id="words" style="flex:1">—</pre>
-    </div>
-
-    <div style="margin-top:10px;"><strong>ROI Tuner (حرك المربعات حتى يظهر السطر داخل المربع الأحمر)</strong></div>
-    <div class="row">
-      <label>X</label><input id="rX" type="range" min="0" max="100" value="50">
-      <label>Y</label><input id="rY" type="range" min="0" max="100" value="72">
-      <label>W</label><input id="rW" type="range" min="50" max="480" value="260">
-      <label>H</label><input id="rH" type="range" min="20" max="240" value="60">
+      X <input id="rX" type="range" min="0" max="100" value="50">
+      Y <input id="rY" type="range" min="0" max="100" value="72">
+      W <input id="rW" type="range" min="50" max="480" value="260">
+      H <input id="rH" type="range" min="20" max="240" value="60">
     </div>
   </div>
 
@@ -85,39 +71,30 @@ const logBox = document.getElementById('log');
 const toggleBtn = document.getElementById('togglePreview');
 const snapBtn = document.getElementById('snapBtn');
 const restartBtn = document.getElementById('restartBtn');
-
 const rX = document.getElementById('rX');
 const rY = document.getElementById('rY');
 const rW = document.getElementById('rW');
 const rH = document.getElementById('rH');
-
 const fullCanvas = document.getElementById('fullCanvas');
 const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
 const roiCanvas = document.getElementById('roiCanvas');
 const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
-// حالات
-let showPreview = false;
-let workerReady = false;
-let videoReady = false;
-let worker = null;
-let scanning = true;
-let ocrRunning = false;
-let lastAttempt = 0;
-const minInterval = 450;
-const requiredStable = 2;
-let lastText = null;
-let stableCount = 0;
-
-// ROI افتراضي
+// حالات التشغيل والمتغيرات
 let ROI = { cxPerc: 50, cyPerc: 72, wPx: 260, hPx: 60 };
+let showPreview = false, workerReady = false, videoReady = false;
+let worker = null, scanning = true, ocrRunning = false;
+let lastAttempt = 0, lastText = null, stableCount = 0;
+const minInterval = 450, requiredStable = 2;
 
 function log(msg){ logBox.innerText = msg; console.log(msg); }
 
-// بدأ الكاميرا
+// ابدأ الكاميرا
 async function startCamera(){
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
     video.srcObject = stream;
     log('Camera started');
   } catch (e) {
@@ -126,7 +103,7 @@ async function startCamera(){
   }
 }
 
-// init worker
+// تهيئة عامل Tesseract وإعدادات الأداء
 (async function initWorker(){
   worker = Tesseract.createWorker({ logger: m => { /* optional */ } });
   await worker.load();
@@ -142,7 +119,7 @@ async function startCamera(){
   if (videoReady) startLoop();
 })();
 
-// تحديث بيانات ROI من منزلقات
+// تحديث قيم ROI من الواجهات
 function updateROIdataFromControls(){
   ROI.cxPerc = Number(rX.value);
   ROI.cyPerc = Number(rY.value);
@@ -151,7 +128,7 @@ function updateROIdataFromControls(){
   positionROIBox();
 }
 
-// وضع المربع الأحمر و الـ preview بمكان واحد
+// وضع مربع ROI والـ preview متطابقان
 function positionROIBox(){
   const vRect = video.getBoundingClientRect();
   const rootRect = viewerRoot.getBoundingClientRect();
@@ -163,7 +140,7 @@ function positionROIBox(){
   roiBox.style.height = boxH + 'px';
   roiBox.style.left = (leftInViewer + (vRect.left - rootRect.left)) + 'px';
   roiBox.style.top = (topInViewer + (vRect.top - rootRect.top)) + 'px';
-  // preview canvas same place/size
+  // مزامنة preview
   previewCanvas.style.left = roiBox.style.left;
   previewCanvas.style.top = roiBox.style.top;
   previewCanvas.style.width = boxW + 'px';
@@ -172,14 +149,13 @@ function positionROIBox(){
   previewCanvas.height = boxH;
 }
 
-// حساب إحداثيات القطع على fullCanvas بدقة الفيديو الحقيقية
+// تحويل إحداثيات العرض إلى إحداثيات الصورة بدقة الفيديو الحقيقية
 function computeROIforCapture(){
   const vRect = video.getBoundingClientRect();
   const vw = vRect.width, vh = vRect.height;
   const boxW = ROI.wPx, boxH = ROI.hPx;
   const leftInViewer = (vw * ROI.cxPerc/100) - boxW/2;
   const topInViewer = (vh * ROI.cyPerc/100) - boxH/2;
-  // تحويل إلى إحداثيات fullCanvas (دقة الفيديو الحقيقية)
   const scaleX = fullCanvas.width / vw;
   const scaleY = fullCanvas.height / vh;
   const sx = Math.round(leftInViewer * scaleX);
@@ -189,36 +165,34 @@ function computeROIforCapture(){
   return { sx, sy, sw, sh, dstW: previewCanvas.width, dstH: previewCanvas.height };
 }
 
-// prepareROIBlob محسن: upscale ×2, sharpen, median blur, threshold, optional invert
+// دالة المعالجة النهائية للـ ROI: upscale ×2, sharpen, median blur, threshold, auto invert
 async function prepareROIBlob(){
-  // رسم فريم الفيديو على fullCanvas
+  // ارسم فريم الفيديو على fullCanvas
   fullCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
   const { sx, sy, sw, sh } = computeROIforCapture();
 
-  // upscale factor (2x) لتحسين دقة Tesseract
+  // حماية حدود القطع
+  const safeSx = Math.max(0, Math.min(fullCanvas.width - 1, sx));
+  const safeSy = Math.max(0, Math.min(fullCanvas.height - 1, sy));
+  const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
+  const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
+
+  // upscale factor لتحسين دقة Tesseract
   const factor = 2;
   const targetW = Math.max(200, Math.round(previewCanvas.width * factor));
   const targetH = Math.max(40, Math.round(previewCanvas.height * factor));
   roiCanvas.width = targetW;
   roiCanvas.height = targetH;
   roiCtx.clearRect(0,0,targetW,targetH);
-
-  // حماية الحدود
-  const safeSx = Math.max(0, Math.min(fullCanvas.width-1, sx));
-  const safeSy = Math.max(0, Math.min(fullCanvas.height-1, sy));
-  const safeSw = Math.max(1, Math.min(fullCanvas.width - safeSx, sw));
-  const safeSh = Math.max(1, Math.min(fullCanvas.height - safeSy, sh));
-
-  // crop -> resize (to roiCanvas)
   roiCtx.drawImage(fullCanvas, safeSx, safeSy, safeSw, safeSh, 0, 0, targetW, targetH);
 
-  // get ImageData
+  // احصل على بيانات الصورة
   const img = roiCtx.getImageData(0,0,targetW,targetH);
   const data = img.data;
   const w = targetW, h = targetH;
 
   // 1) grayscale + contrast
-  const contrastFactor = 1.6; // جرب 1.4-1.8 لتعديل دقة
+  const contrastFactor = 1.6;
   const intercept = 128 * (1 - contrastFactor);
   for (let i = 0; i < data.length; i += 4) {
     const g = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
@@ -226,7 +200,7 @@ async function prepareROIBlob(){
     data[i] = data[i+1] = data[i+2] = v;
   }
 
-  // 2) sharpen kernel (3x3): kernel = [0,-1,0; -1,5,-1; 0,-1,0]
+  // 2) sharpen kernel 3x3 (using copy)
   const copy = new Uint8ClampedArray(data);
   for (let y = 1; y < h-1; y++){
     for (let x = 1; x < w-1; x++){
@@ -269,26 +243,26 @@ async function prepareROIBlob(){
     if (v === 255) whiteCount++;
   }
 
-  // 5) optional invert if background too white/black
+  // 5) auto invert if necessary (make dark text on light bg -> invert to light text on dark bg for LSTM)
   const whiteRatio = whiteCount / (data.length / 4);
-  // إذا النسبة صغيرة (الخلفية غالباً داكنة والكتابة فاتحة) نحتفظ، أما إذا النص داكن على خلفية فاتحة فنعكس
-  if (whiteRatio > 0.85) {
-    // غالباً النص داكن على خلفية فاتحة => نعكس لتصبح الأرقام فاتحة على خلفية داكنة
-    for (let i=0;i<data.length;i+=4){
+  if (whiteRatio < 0.5) {
+    // background dark, keep as-is (white text on dark bg)
+    // For our case we want white text -> invert so Tesseract sees dark text on light bg
+    for (let i = 0; i < data.length; i += 4) {
       const v = 255 - data[i];
-      data[i]=data[i+1]=data[i+2]=v;
+      data[i] = data[i+1] = data[i+2] = v;
     }
   }
 
   roiCtx.putImageData(img, 0, 0);
 
-  // عرض preview (مقاس العرض الظاهر)
+  // عرض preview إن مفعل
   if (showPreview) {
     previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
     previewCtx.drawImage(roiCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
   }
 
-  // إرجاع blob جاهز للـ OCR
+  // إرجاع blob
   return new Promise(resolve => {
     roiCanvas.toBlob(b => {
       if (!b || b.size < 200) resolve(null); else resolve(b);
@@ -296,7 +270,7 @@ async function prepareROIBlob(){
   });
 }
 
-// OCR logic with debug output
+// منطق OCR مع إظهار النتائج التشخيصية
 async function doOCR(){
   if (!workerReady || !videoReady) return;
   if (ocrRunning) return;
@@ -306,11 +280,10 @@ async function doOCR(){
   ocrRunning = true;
   try {
     const blob = await prepareROIBlob();
-    if (!blob){ resultBox.innerText = 'Preview empty - اضبط ROI أو الإضاءة'; ocrRunning=false; return; }
+    if (!blob) { resultBox.innerText = 'Preview empty - اضبط ROI أو الإضاءة'; ocrRunning=false; return; }
     const { data } = await worker.recognize(blob);
     const text = (data && data.text) ? data.text : '';
     rawBox.textContent = text || '—';
-    // عرض الكلمات مع confidence لتشخيص
     if (data && data.words && data.words.length){
       const lines = data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`);
       wordsBox.textContent = lines.join('\n');
@@ -318,7 +291,7 @@ async function doOCR(){
       wordsBox.textContent = '—';
     }
     const cleaned = text.replace(/\s+/g,'');
-    const match = cleaned.match(TARGET_REGEX); // استخدم الريجيكس كما هو
+    const match = cleaned.match(TARGET_REGEX); // الريجيكس كما طلبت
     if (match){
       const candidate = match[0];
       if (candidate === lastText) stableCount++; else { lastText = candidate; stableCount = 1; }
@@ -334,42 +307,38 @@ async function doOCR(){
   } finally { ocrRunning=false; }
 }
 
-// Loop
+// حلقة المسح الهادئة
 let raf = null;
 function startLoop(){
   if (raf) return;
   scanning = true;
   resultBox.innerText = 'Waiting...';
   function step(){
-    if (!scanning){ cancelAnimationFrame(raf); raf=null; return; }
+    if (!scanning){ cancelAnimationFrame(raf); raf = null; return; }
     doOCR();
     raf = requestAnimationFrame(step);
   }
   raf = requestAnimationFrame(step);
 }
 
-// Snap button: open processed ROI in new tab for inspection
-snapBtn.addEventListener('click', async () => {
-  const blob = await prepareROIBlob();
-  if (!blob) { alert('Preview empty or too small'); return; }
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-});
-
-// toggle preview
+// واجهات المستخدم: أزرار، منزلقات
 toggleBtn.addEventListener('click', () => {
   showPreview = !showPreview;
   previewCanvas.style.display = showPreview ? 'block' : 'none';
   toggleBtn.innerText = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة';
 });
 
-// restart
+snapBtn.addEventListener('click', async () => {
+  const blob = await prepareROIBlob();
+  if (!blob) { alert('Preview empty or too small'); return; }
+  window.open(URL.createObjectURL(blob), '_blank');
+});
+
 restartBtn.addEventListener('click', () => {
-  scanning=true; lastText=null; stableCount=0; resultBox.innerText='Waiting...';
+  scanning = true; lastText = null; stableCount = 0; resultBox.innerText = 'Waiting...';
   if (workerReady && videoReady) startLoop();
 });
 
-// sliders
 [rX,rY,rW,rH].forEach(control => control.addEventListener('input', updateROIdataFromControls));
 function updateROIdataFromControls(){
   ROI.cxPerc = Number(rX.value);
@@ -379,14 +348,13 @@ function updateROIdataFromControls(){
   positionROIBox();
 }
 
-// when video metadata ready
+// عندما تكون بيانات الفيديو جاهزة
 video.addEventListener('loadedmetadata', () => {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
   const maxW = Math.min(900, window.innerWidth - 40);
   video.style.width = maxW + 'px';
   video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
-  // set initial ROI from controls
   rX.value = ROI.cxPerc; rY.value = ROI.cyPerc; rW.value = ROI.wPx; rH.value = ROI.hPx;
   updateROIdataFromControls();
   videoReady = true;
@@ -394,12 +362,11 @@ video.addEventListener('loadedmetadata', () => {
   if (workerReady) startLoop();
 });
 
-// init camera
+// ابدأ الكاميرا فور التحميل
 startCamera();
 
-// cleanup
+// تنظيف العامل عند الخروج
 window.addEventListener('beforeunload', async () => { if (worker) await worker.terminate(); });
-
 </script>
 </body>
 </html>
