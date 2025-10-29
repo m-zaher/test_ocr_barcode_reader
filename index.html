@@ -2,7 +2,7 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Barcode + National ID (final)</title>
+  <title>OCR Tawkeel — Barcode + National ID (compact video)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
@@ -12,15 +12,17 @@
     h1{font-size:18px;margin:0}
     main{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center}
     .viewer{position:relative;display:inline-block;margin-top:12px}
-    /* مصغر عرض الفيديو ليتناسب مع صفحات أصغر */
+    /* مصغر عرض الفيديو وارتفاع ثابت أصغر */
     video{
       border:2px solid #444;
       border-radius:8px;
       background:#000;
       display:block;
-      max-width:360px;
+      max-width:320px;   /* العرض المصغر */
       width:100%;
+      max-height:200px;  /* ارتفاع أقصى ثابت */
       height:auto;
+      object-fit:cover;  /* يحافظ على تغطية الإطار */
     }
     #roi-box{position:absolute;border:2px dashed var(--accent);box-sizing:border-box;pointer-events:none}
     #preview-canvas{position:absolute;pointer-events:none;image-rendering:pixelated;border-radius:4px;display:none;background:#fff}
@@ -51,7 +53,7 @@
   </header>
 
   <main>
-    <section style="min-width:280px">
+    <section style="min-width:240px">
       <div class="viewer" id="viewerRoot">
         <video id="video" autoplay playsinline muted></video>
         <div id="roi-box" aria-hidden="true"></div>
@@ -59,15 +61,10 @@
       </div>
 
       <div id="controls">
-        <!-- Debug-only action buttons -->
         <button id="togglePreview" class="debugOnly">عرض المعالجة</button>
         <button id="snapBtn" class="debugOnly">فتح Snap</button>
         <button id="runOnceBtn" class="debugOnly">جرب مرة واحدة الآن</button>
-
-        <!-- زر إعادة التهيئة الكامل مسمى "جديد" -->
         <button id="resetAllBtn">جديد</button>
-
-        <!-- copy log visible only in debug -->
         <button id="copyLogBtn" class="debugOnly hidden">نسخ سجل التشغيل</button>
       </div>
 
@@ -91,7 +88,7 @@
       </div>
     </section>
 
-    <aside style="min-width:320px;max-width:720px">
+    <aside style="min-width:300px;max-width:720px">
       <div id="settingsPanel" class="settingsPanel hidden debugOnly">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <strong>خيارات المعالجة وTesseract (Debug only)</strong>
@@ -204,7 +201,7 @@ const roiControls = document.getElementById('roiControls');
 const debugDiagnostics = document.getElementById('debugDiagnostics');
 
 /* ---------- حالات وعدادات الاستقرار ---------- */
-let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
+let ROI = { cxPerc:50, cyPerc:72, wPx:220, hPx:48 }; // أصغر افتراضياً ليتناسب مع الفيديو المصغر
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null;
 let scanning = true;
@@ -565,7 +562,7 @@ resetAllBtn.addEventListener('click', ()=> {
   barcodeLabel.textContent = 'Waiting...';
   idLabel.textContent = 'Waiting...';
   setError('');
-  ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
+  ROI = { cxPerc:50, cyPerc:72, wPx:220, hPx:48 };
   positionROI();
   setTimeout(()=>{ scanning = true; if (workerReady && videoReady) startLoop(); }, 150);
 });
@@ -622,13 +619,15 @@ toggleDebugBtn.addEventListener('click', ()=> {
   appendLog('Debug toggled via button: ' + (DEBUG ? 'on' : 'off'));
 });
 
-/* video metadata & start (use smaller max width to match CSS) */
+/* video metadata & start (adjusted max width to 320 to match CSS) */
 video.addEventListener('loadedmetadata', ()=> {
   fullCanvas.width = video.videoWidth || 1280;
   fullCanvas.height = video.videoHeight || 720;
-  const maxW = Math.min(360, window.innerWidth - 40); // matches CSS max-width
+  const maxW = Math.min(320, window.innerWidth - 40); // matches CSS max-width
   video.style.width = maxW + 'px';
-  video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
+  // scale height proportional but cap by CSS max-height
+  const calcHeight = Math.round(maxW * (fullCanvas.height / fullCanvas.width));
+  video.style.height = Math.min(calcHeight, 200) + 'px';
   rX && (rX.value = ROI.cxPerc);
   rY && (rY.value = ROI.cyPerc);
   rW && (rW.value = ROI.wPx);
