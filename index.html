@@ -2,21 +2,18 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Production + Debug</title>
+  <title>OCR Tawkeel — Production (hidden settings)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <!--
-    CDN: استعمل إصدار محدد متوافق. الافتراضي هنا 2.1.5 (يدعم createWorker).
-    إن أردت نسخة أحدث غيّر هذا السطر إلى الإصدار الذي تختبره.
-    يمكنك أيضاً إزالة هذا السطر واستخدام lazy-load عبر loadTesseractIfNeeded().
-  -->
+  <!-- استخدم نسخة ثابتة من tesseract؛ إن ظهر خطأ جرب تغيير النسخة -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
-    body{font-family:Arial, system-ui; direction:rtl; padding:12px; margin:0}
+    :root { --muted:#666; --accent:#e33; --panel:#f7f7f7; }
+    body{font-family:Arial,system-ui;direction:rtl;padding:12px;margin:0;color:#111}
     header{display:flex;justify-content:space-between;align-items:center;gap:12px}
     h1{font-size:18px;margin:0}
     .viewer{position:relative;display:inline-block;margin-top:12px}
     video{border:2px solid #444;border-radius:8px;background:#000;display:block;max-width:90vw;height:auto}
-    #roi-box{position:absolute;border:2px dashed #e33;box-sizing:border-box;pointer-events:none}
+    #roi-box{position:absolute;border:2px dashed var(--accent);box-sizing:border-box;pointer-events:none}
     #preview-canvas{position:absolute;pointer-events:none;image-rendering:pixelated;border-radius:4px;display:none;background:#fff}
     #controls{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
     #controls button{padding:8px 10px}
@@ -24,21 +21,23 @@
     .row{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
     label{min-width:90px}
     input[type="range"]{width:160px}
-    pre{background:#f7f7f7;padding:8px;border-radius:6px;overflow:auto;max-height:220px;white-space:pre-wrap}
+    pre{background:var(--panel);padding:8px;border-radius:6px;overflow:auto;max-height:220px;white-space:pre-wrap}
     #log{height:220px}
-    #result{font-weight:bold;color:green;min-height:22px}
+    #barcodeLabel{font-weight:bold;color:green;min-height:22px}
     #errorLine{color:#b00;font-weight:bold;min-height:18px}
-    .small{font-size:13px;color:#666}
-    footer{margin-top:14px;font-size:12px;color:#666}
+    .small{font-size:13px;color:var(--muted)}
+    footer{margin-top:14px;font-size:12px;color:var(--muted)}
+    .hidden { display:none !important; }
+    .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; }
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
 <body>
   <header>
     <h1>OCR Tawkeel</h1>
+    <!-- زر النمط التجريبي مخفي افتراضياً؛ يمكن تفعيله عبر Ctrl+Shift+D أو ?debug=1 -->
     <div>
-      <button id="toggleDebugBtn">تبديل Debug</button>
-      <button id="flushLogsBtn" style="display:none">عرض السجل</button>
+      <button id="toggleDebugBtn" class="hidden">Debug</button>
     </div>
   </header>
 
@@ -55,30 +54,33 @@
         <button id="snapBtn">فتح Snap</button>
         <button id="runOnceBtn">جرب مرة واحدة الآن</button>
         <button id="restartBtn">إعادة محاولة</button>
-        <button id="copyLogBtn">نسخ سجل التشغيل</button>
+        <button id="copyLogBtn" class="hidden">نسخ سجل التشغيل</button>
       </div>
 
       <div class="row" style="margin-top:10px">
-        <div><strong>نتيجة مؤكدة:</strong> <span id="result">Waiting...</span></div>
+        <div><strong>رقم الباركود:</strong> <span id="barcodeLabel">Waiting...</span></div>
         <div id="errorLine"></div>
       </div>
 
-      <div style="margin-top:8px" class="small">تحكم ROI وجرب إعدادات المعالجة لتلائم ظروف الإضاءة والخط</div>
-      <div class="row" style="margin-top:6px">
-        <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
-        <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
-      </div>
-      <div class="row">
-        <label>Width px</label><input id="rW" type="range" min="60" max="900" value="260">
-        <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
+      <div style="margin-top:8px" class="small">ضع النص داخل الإطار الأحمر ثم اضغط "جرب مرة واحدة" أو انتظر المسح التلقائي</div>
+
+      <div style="margin-top:10px" id="roiControls" class="hidden">
+        <div class="row">
+          <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
+          <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
+        </div>
+        <div class="row">
+          <label>Width px</label><input id="rW" type="range" min="60" max="900" value="260">
+          <label>Height px</label><input id="rH" type="range" min="12" max="400" value="60">
+        </div>
       </div>
     </section>
 
     <aside style="min-width:420px;max-width:720px">
-      <div style="border:1px solid #eee;padding:10px;border-radius:6px">
+      <div id="settingsPanel" class="settingsPanel hidden">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <strong>خيارات المعالجة وTesseract</strong>
-          <span class="small">Debug: <span id="dbgBadge">off</span></span>
+          <span class="small">Debug mode</span>
         </div>
 
         <div class="row" style="margin-top:8px">
@@ -111,29 +113,25 @@
           <input id="medianRange" type="range" min="0" max="2" step="1" value="1"><span id="medianVal">1</span>
           <label>Force Invert</label><input id="forceInvert" type="checkbox">
         </div>
+
+        <div style="margin-top:10px">
+          <button id="clearLogBtn" style="font-size:12px">مسح السجل</button>
+          <button id="flushLogsBtn" style="font-size:12px">عرض السجل</button>
+        </div>
       </div>
 
       <div style="margin-top:10px;border:1px solid #eee;padding:10px;border-radius:6px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong>مخرجات تشخيصية</strong>
-          <button id="clearLogBtn" style="font-size:12px">مسح</button>
-        </div>
+        <div><strong>مخرجات تشخيصية</strong></div>
         <div class="row" style="margin-top:8px">
-          <div style="flex:1">
-            <div><strong>Raw OCR</strong></div>
-            <pre id="raw">—</pre>
-          </div>
-          <div style="flex:1">
-            <div><strong>Words (text : confidence)</strong></div>
-            <pre id="words">—</pre>
-          </div>
+          <div style="flex:1"><div><strong>Raw OCR</strong></div><pre id="raw">—</pre></div>
+          <div style="flex:1"><div><strong>Words (text : confidence)</strong></div><pre id="words">—</pre></div>
         </div>
         <div style="margin-top:10px"><strong>سجل التشغيل</strong></div>
         <pre id="log">جاري التهيئة...</pre>
       </div>
 
       <footer class="small" style="margin-top:8px">
-        ملاحظة: في بيئة production تأكد من تحميل Tesseract من CDN محدد بالإصدار، تفعيل HTTPS، وضبط CSP ورفع sourcemaps عند الحاجة.
+        ملاحظة: الإعدادات مرئية فقط في وضع Debug. لتشغيل واجهة Debug اضغط Ctrl+Shift+D أو افتح الصفحة مع ?debug=1
       </footer>
     </aside>
   </main>
@@ -142,7 +140,7 @@
   <canvas id="roiCanvas" style="display:none"></canvas>
 
 <script>
-/* ------- ثابت التعرف (لا تغيره إذا لم تكن تعرف سبب التغيير) ------- */
+/* ---------- ثابت التعرف ---------- */
 const TARGET_REGEX = /ECP\d{8}EG/;
 
 /* عناصر DOM */
@@ -156,12 +154,11 @@ const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
 const roiCanvas = document.getElementById('roiCanvas');
 const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
 
-const resultEl = document.getElementById('result');
+const barcodeLabel = document.getElementById('barcodeLabel');
 const rawEl = document.getElementById('raw');
 const wordsEl = document.getElementById('words');
 const logEl = document.getElementById('log');
 const errorLine = document.getElementById('errorLine');
-const dbgBadge = document.getElementById('dbgBadge');
 
 const togglePreview = document.getElementById('togglePreview');
 const snapBtn = document.getElementById('snapBtn');
@@ -183,8 +180,10 @@ const medianVal = document.getElementById('medianVal');
 const forceInvert = document.getElementById('forceInvert');
 
 const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW = document.getElementById('rW'), rH = document.getElementById('rH');
+const settingsPanel = document.getElementById('settingsPanel');
+const roiControls = document.getElementById('roiControls');
 
-/* حالات وتهيئة */
+/* حالات */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
 let showPreview = false, workerReady = false, videoReady = false;
 let worker = null, createWorkerFn = null;
@@ -192,36 +191,41 @@ let scanning = true, ocrRunning = false;
 let lastAttempt = 0, lastText = null, stableCount = 0;
 const minInterval = 400, requiredStable = 2;
 
-/* Debug flag sources: query param ?debug=1 or localStorage */
+/* Debug flag sources: query param ?debug=1 or localStorage or keyboard shortcut */
 const urlParams = new URLSearchParams(location.search);
 const DEBUG_QP = urlParams.get('debug') === '1';
 const DEBUG_LS = localStorage.getItem('ocr_debug') === '1';
 let DEBUG = Boolean(DEBUG_QP || DEBUG_LS);
-dbgBadge.textContent = DEBUG ? 'on' : 'off';
-flushLogsBtn.style.display = DEBUG ? 'inline-block' : 'none';
 
-/* log buffer - always collect, only render UI in debug mode */
+/* عناصر واجهة debug مخفية أو مرئية حسب DEBUG */
+function applyDebugVisibility(){
+  if (DEBUG){
+    settingsPanel.classList.remove('hidden');
+    copyLogBtn.classList.remove('hidden');
+    toggleDebugBtn.classList.remove('hidden');
+    flushLogsBtn.classList.remove('hidden');
+    roiControls.classList.remove('hidden');
+  } else {
+    settingsPanel.classList.add('hidden');
+    copyLogBtn.classList.add('hidden');
+    toggleDebugBtn.classList.add('hidden');
+    flushLogsBtn.classList.add('hidden');
+    roiControls.classList.add('hidden');
+  }
+}
+applyDebugVisibility();
+
+/* log buffer */
 const LOG_BUFFER = [];
 function appendLog(line){
   const t = new Date().toLocaleTimeString();
   const entry = `[${t}] ${line}`;
   LOG_BUFFER.unshift(entry);
-  // cap buffer
   if (LOG_BUFFER.length > 1000) LOG_BUFFER.pop();
-  if (DEBUG) {
-    logEl.textContent = LOG_BUFFER.join('\n');
-  }
-  // always show errors in console for ops visibility
+  if (DEBUG) logEl.textContent = LOG_BUFFER.join('\n');
   if (/error/i.test(line)) console.error(entry);
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
-
-/* safe console wrapper */
-const _console = {
-  log: (...args) => { if (DEBUG) console.log(...args); },
-  warn: (...args) => { if (DEBUG) console.warn(...args); },
-  error: (...args) => { console.error(...args); }
-};
 
 /* start camera */
 async function startCamera(){
@@ -235,13 +239,12 @@ async function startCamera(){
   }
 }
 
-/* lazy-load tesseract if needed (production-friendly) */
+/* lazy-load tesseract if needed */
 async function loadTesseractIfNeeded(){
   if (window.Tesseract) return window.Tesseract;
   appendLog('Lazy-loading Tesseract.js');
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    // here you can set the exact version you want in production
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js';
     s.crossOrigin = 'anonymous';
     s.onload = () => { appendLog('Tesseract script loaded'); resolve(window.Tesseract); };
@@ -250,7 +253,7 @@ async function loadTesseractIfNeeded(){
   });
 }
 
-/* initWorker with compatibility and robust guards */
+/* init worker (compat) */
 async function initWorker(){
   appendLog('Initializing Tesseract worker (compat mode)...');
   try {
@@ -260,7 +263,6 @@ async function initWorker(){
     setError('فشل تحميل مكتبة Tesseract');
     return;
   }
-
   try {
     if (typeof Tesseract !== 'undefined' && typeof Tesseract.createWorker === 'function') {
       createWorkerFn = Tesseract.createWorker;
@@ -286,17 +288,13 @@ async function initWorker(){
       return;
     }
 
-    // fallback: Tesseract.recognize
     if (typeof Tesseract !== 'undefined' && typeof Tesseract.recognize === 'function') {
       appendLog('Fallback: using Tesseract.recognize');
       worker = {
         recognize: async (blob, opts={}) => {
           if (!blob) throw new Error('recognize: blob null');
           const tmpUrl = URL.createObjectURL(blob);
-          try {
-            const res = await Tesseract.recognize(tmpUrl, 'eng', opts);
-            return res;
-          } finally { URL.revokeObjectURL(tmpUrl); }
+          try { const res = await Tesseract.recognize(tmpUrl, 'eng', opts); return res; } finally { URL.revokeObjectURL(tmpUrl); }
         },
         setParameters: async () => {},
         terminate: async () => {}
@@ -306,7 +304,7 @@ async function initWorker(){
       return;
     }
 
-    appendLog('No suitable Tesseract interface found in this environment');
+    appendLog('No suitable Tesseract interface found');
     setError('لم يتم تحميل واجهة Tesseract المناسبة. استخدم CDN متوافق.');
   } catch(err){
     appendLog('initWorker error: ' + (err && err.message ? err.message : err));
@@ -392,7 +390,7 @@ async function prepareROIBlob(){
   return new Promise(resolve => { roiCanvas.toBlob(b => { if (!b){ appendLog('toBlob null'); resolve(null); } else if (b.size < 150){ appendLog('blob too small: ' + b.size); resolve(null); } else resolve(b); }, 'image/png'); });
 }
 
-/* safe recognize wrapper handling createWorker vs fallback and .endsWith issues */
+/* safe recognize */
 async function attemptRecognizeWithBlob(blob, opts){
   try {
     const res = await worker.recognize(blob, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
@@ -410,15 +408,10 @@ async function safeRecognize(blob, opts){
   if (!blob) throw new Error('safeRecognize: blob null');
   if (!worker) throw new Error('safeRecognize: worker null');
   if (typeof worker.recognize !== 'function') throw new Error('safeRecognize: worker.recognize missing');
-  // try blob directly
   const tryDirect = await attemptRecognizeWithBlob(blob, opts).catch(e => { appendLog('attemptRecognizeWithBlob threw: ' + e); return null; });
   if (tryDirect) return tryDirect;
-  // fallback via URL
   const url = URL.createObjectURL(blob);
-  try {
-    const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {});
-    return res;
-  } finally { URL.revokeObjectURL(url); }
+  try { const res = await worker.recognize(url, opts && opts.lang ? opts.lang : 'eng', opts && opts.options ? opts.options : {}); return res; } finally { URL.revokeObjectURL(url); }
 }
 
 /* do OCR once */
@@ -444,15 +437,23 @@ async function doOCROnce(){
     appendLog('recognize OK, text length: ' + (res.data.text ? res.data.text.length : 0));
     const cleaned = (res.data.text || '').replace(/\s+/g,'');
     const match = cleaned.match(TARGET_REGEX);
-    if (match){ appendLog('MATCH: ' + match[0]); return match[0]; }
-    else { appendLog('No regex match. Cleaned: "'+cleaned+'"'); setError('لم يتم إيجاد تطابق — جرّب PSM/Threshold/Invert'); return null; }
+    if (match){
+      appendLog('MATCH: ' + match[0]);
+      barcodeLabel.textContent = match[0]; // عرض النتيجة تحت ليبل "رقم الباركود"
+      return match[0];
+    } else {
+      appendLog('No regex match. Cleaned: "'+cleaned+'"');
+      setError('لم يتم إيجاد تطابق — جرّب PSM/Threshold/Invert');
+      barcodeLabel.textContent = 'Waiting...';
+      return null;
+    }
   } catch (e){ appendLog('recognize error: ' + (e && e.message ? e.message : e)); setError('خطأ أثناء التعرف: ' + (e && e.message ? e.message : e)); return null; }
 }
 
 /* main loop */
 async function startLoop(){
   if (!workerReady || !videoReady){ appendLog('لا يمكن بدء اللوب - عامل أو فيديو غير جاهزين'); return; }
-  scanning = true; resultEl.textContent = 'Waiting...'; setError('');
+  scanning = true; barcodeLabel.textContent = 'Waiting...'; setError('');
   while (scanning){
     const now = Date.now();
     if (now - lastAttempt < minInterval){ await new Promise(r=>setTimeout(r, minInterval)); continue; }
@@ -462,18 +463,21 @@ async function startLoop(){
       if (res){
         if (res === lastText) stableCount++; else { lastText = res; stableCount = 1; }
         appendLog('Stable count: ' + stableCount);
-        if (stableCount >= requiredStable){ resultEl.textContent = res; appendLog('Finalized: ' + res); scanning = false; break; }
+        if (stableCount >= requiredStable){ barcodeLabel.textContent = res; appendLog('Finalized: ' + res); scanning = false; break; }
       } else { lastText = null; stableCount = 0; }
     } catch(e){ appendLog('Loop error: ' + e); await new Promise(r=>setTimeout(r,500)); }
     await new Promise(r=>setTimeout(r,200));
   }
 }
 
-/* UI wiring */
+/* UI wiring and visibility controls */
 togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
+
 snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
+
 runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
-restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; resultEl.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
+
+restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; barcodeLabel.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
 
 copyLogBtn.addEventListener('click', async () => {
   try {
@@ -492,24 +496,37 @@ copyLogBtn.addEventListener('click', async () => {
   } catch(err){ appendLog('خطأ أثناء النسخ: ' + (err && err.message ? err.message : err)); setError('خطأ أثناء النسخ'); }
 });
 
-clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG) logEl.textContent=''; appendLog('log cleared'); });
+clearLogBtn && clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG) logEl.textContent=''; appendLog('log cleared'); });
 
-toggleDebugBtn.addEventListener('click', ()=> {
-  DEBUG = !DEBUG;
-  if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
-  dbgBadge.textContent = DEBUG ? 'on' : 'off';
-  appendLog('Debug toggled to ' + (DEBUG ? 'on' : 'off'));
-  if (DEBUG) logEl.textContent = LOG_BUFFER.join('\n'); else logEl.textContent = '';
-  flushLogsBtn.style.display = DEBUG ? 'inline-block' : 'none';
-});
+flushLogsBtn && flushLogsBtn.addEventListener('click', ()=>{ logEl.textContent = LOG_BUFFER.join('\n'); });
 
-/* UI controls binding */
 psmSelect.addEventListener('change', ()=> appendLog('PSM changed to ' + psmSelect.value));
 upscaleSelect.addEventListener('change', ()=> appendLog('Upscale set to ' + upscaleSelect.value));
 threshRange.addEventListener('input', ()=> { threshVal.textContent = threshRange.value; appendLog('Threshold=' + threshRange.value); });
 sharpenRange.addEventListener('input', ()=> { sharpenVal.textContent = sharpenRange.value; });
 medianRange.addEventListener('input', ()=> { medianVal.textContent = medianRange.value; });
-[rX,rY,rW,rH].forEach(el => el.addEventListener('input', ()=>{ ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI(); }));
+
+[rX,rY,rW,rH].forEach(el => el && el.addEventListener('input', ()=>{ ROI.cxPerc = Number(rX.value); ROI.cyPerc = Number(rY.value); ROI.wPx = Number(rW.value); ROI.hPx = Number(rH.value); positionROI(); }));
+
+/* keyboard shortcut Ctrl+Shift+D toggles debug (hidden feature for admins) */
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') {
+    DEBUG = !DEBUG;
+    if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
+    applyDebugVisibility();
+    appendLog('Debug toggled via shortcut: ' + (DEBUG ? 'on' : 'off'));
+    // show copy button and settings when debug enabled
+    if (DEBUG) copyLogBtn.classList.remove('hidden'); else copyLogBtn.classList.add('hidden');
+  }
+});
+
+/* also allow explicit toggle button if visible */
+toggleDebugBtn.addEventListener('click', ()=> {
+  DEBUG = !DEBUG;
+  if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
+  applyDebugVisibility();
+  appendLog('Debug toggled via button: ' + (DEBUG ? 'on' : 'off'));
+});
 
 /* video metadata & start */
 video.addEventListener('loadedmetadata', ()=> {
@@ -518,19 +535,21 @@ video.addEventListener('loadedmetadata', ()=> {
   const maxW = Math.min(980, window.innerWidth - 40);
   video.style.width = maxW + 'px';
   video.style.height = (maxW * (fullCanvas.height / fullCanvas.width)) + 'px';
-  rX.value = ROI.cxPerc; rY.value = ROI.cyPerc; rW.value = ROI.wPx; rH.value = ROI.hPx;
+  rX && (rX.value = ROI.cxPerc);
+  rY && (rY.value = ROI.cyPerc);
+  rW && (rW.value = ROI.wPx);
+  rH && (rH.value = ROI.hPx);
   positionROI();
   videoReady = true;
   appendLog('Video ready (metadata)');
-  // initialize worker after video ready optionally
   if (!workerReady) initWorker();
-  // if both ready, start loop
   if (workerReady) startLoop();
 });
 
-/* init: start camera and worker (lazy init done inside initWorker) */
+/* init */
 startCamera();
 appendLog('Page loaded; debug=' + (DEBUG ? 'on' : 'off'));
+if (DEBUG) applyDebugVisibility();
 if (!workerReady) initWorker();
 
 /* cleanup */
