@@ -2,9 +2,8 @@
 <html lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>OCR Tawkeel — Production (hidden settings)</title>
+  <title>OCR Tawkeel — Production (debug-hidden outputs)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <!-- استخدم نسخة ثابتة من tesseract؛ إن ظهر خطأ جرب تغيير النسخة -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js" defer></script>
   <style>
     :root { --muted:#666; --accent:#e33; --panel:#f7f7f7; }
@@ -28,14 +27,14 @@
     .small{font-size:13px;color:var(--muted)}
     footer{margin-top:14px;font-size:12px;color:var(--muted)}
     .hidden { display:none !important; }
-    .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; }
+    .settingsPanel { border:1px solid #eee;padding:10px;border-radius:6px; background: #fff; margin-bottom:10px; }
+    .debugOnly { display:none; } /* will be toggled via JS when DEBUG=true */
     @media (max-width:700px){video{width:360px;height:270px}}
   </style>
 </head>
 <body>
   <header>
     <h1>OCR Tawkeel</h1>
-    <!-- زر النمط التجريبي مخفي افتراضياً؛ يمكن تفعيله عبر Ctrl+Shift+D أو ?debug=1 -->
     <div>
       <button id="toggleDebugBtn" class="hidden">Debug</button>
     </div>
@@ -54,7 +53,7 @@
         <button id="snapBtn">فتح Snap</button>
         <button id="runOnceBtn">جرب مرة واحدة الآن</button>
         <button id="restartBtn">إعادة محاولة</button>
-        <button id="copyLogBtn" class="hidden">نسخ سجل التشغيل</button>
+        <button id="copyLogBtn" class="hidden debugOnly">نسخ سجل التشغيل</button>
       </div>
 
       <div class="row" style="margin-top:10px">
@@ -64,7 +63,7 @@
 
       <div style="margin-top:8px" class="small">ضع النص داخل الإطار الأحمر ثم اضغط "جرب مرة واحدة" أو انتظر المسح التلقائي</div>
 
-      <div style="margin-top:10px" id="roiControls" class="hidden">
+      <div style="margin-top:10px" id="roiControls" class="hidden debugOnly">
         <div class="row">
           <label>Center X%</label><input id="rX" type="range" min="0" max="100" value="50">
           <label>Center Y%</label><input id="rY" type="range" min="0" max="100" value="72">
@@ -77,9 +76,9 @@
     </section>
 
     <aside style="min-width:420px;max-width:720px">
-      <div id="settingsPanel" class="settingsPanel hidden">
+      <div id="settingsPanel" class="settingsPanel hidden debugOnly">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong>خيارات المعالجة وTesseract</strong>
+          <strong>خيارات المعالجة وTesseract (Debug only)</strong>
           <span class="small">Debug mode</span>
         </div>
 
@@ -120,18 +119,21 @@
         </div>
       </div>
 
-      <div style="margin-top:10px;border:1px solid #eee;padding:10px;border-radius:6px">
-        <div><strong>مخرجات تشخيصية</strong></div>
-        <div class="row" style="margin-top:8px">
-          <div style="flex:1"><div><strong>Raw OCR</strong></div><pre id="raw">—</pre></div>
-          <div style="flex:1"><div><strong>Words (text : confidence)</strong></div><pre id="words">—</pre></div>
+      <!-- تشخيصات فقط داخل Debug -->
+      <div id="debugDiagnostics" class="hidden debugOnly">
+        <div style="margin-top:10px;border:1px solid #eee;padding:10px;border-radius:6px">
+          <div><strong>مخرجات تشخيصية (Debug)</strong></div>
+          <div class="row" style="margin-top:8px">
+            <div style="flex:1"><div><strong>Raw OCR</strong></div><pre id="raw">—</pre></div>
+            <div style="flex:1"><div><strong>Words (text : confidence)</strong></div><pre id="words">—</pre></div>
+          </div>
+          <div style="margin-top:10px"><strong>سجل التشغيل</strong></div>
+          <pre id="log">جاري التهيئة...</pre>
         </div>
-        <div style="margin-top:10px"><strong>سجل التشغيل</strong></div>
-        <pre id="log">جاري التهيئة...</pre>
       </div>
 
       <footer class="small" style="margin-top:8px">
-        ملاحظة: الإعدادات مرئية فقط في وضع Debug. لتشغيل واجهة Debug اضغط Ctrl+Shift+D أو افتح الصفحة مع ?debug=1
+        ملاحظة: الإعدادات والمخرجات التشخيصية مرئية فقط في وضع Debug. لتشغيل وضع Debug اضغط Ctrl+Shift+D أو افتح الصفحة مع ?debug=1
       </footer>
     </aside>
   </main>
@@ -182,6 +184,7 @@ const forceInvert = document.getElementById('forceInvert');
 const rX = document.getElementById('rX'), rY = document.getElementById('rY'), rW = document.getElementById('rW'), rH = document.getElementById('rH');
 const settingsPanel = document.getElementById('settingsPanel');
 const roiControls = document.getElementById('roiControls');
+const debugDiagnostics = document.getElementById('debugDiagnostics');
 
 /* حالات */
 let ROI = { cxPerc:50, cyPerc:72, wPx:260, hPx:60 };
@@ -197,32 +200,30 @@ const DEBUG_QP = urlParams.get('debug') === '1';
 const DEBUG_LS = localStorage.getItem('ocr_debug') === '1';
 let DEBUG = Boolean(DEBUG_QP || DEBUG_LS);
 
-/* عناصر واجهة debug مخفية أو مرئية حسب DEBUG */
-function applyDebugVisibility(){
-  if (DEBUG){
+/* apply visibility for debug-only UI */
+function setDebugUIVisible(on){
+  const els = document.querySelectorAll('.debugOnly');
+  els.forEach(e => { e.style.display = on ? '' : 'none'; });
+  if (on) {
     settingsPanel.classList.remove('hidden');
+    debugDiagnostics.classList.remove('hidden');
     copyLogBtn.classList.remove('hidden');
-    toggleDebugBtn.classList.remove('hidden');
-    flushLogsBtn.classList.remove('hidden');
-    roiControls.classList.remove('hidden');
   } else {
     settingsPanel.classList.add('hidden');
+    debugDiagnostics.classList.add('hidden');
     copyLogBtn.classList.add('hidden');
-    toggleDebugBtn.classList.add('hidden');
-    flushLogsBtn.classList.add('hidden');
-    roiControls.classList.add('hidden');
   }
 }
-applyDebugVisibility();
+setDebugUIVisible(DEBUG);
 
-/* log buffer */
+/* log buffer - only render in debug */
 const LOG_BUFFER = [];
 function appendLog(line){
   const t = new Date().toLocaleTimeString();
   const entry = `[${t}] ${line}`;
   LOG_BUFFER.unshift(entry);
   if (LOG_BUFFER.length > 1000) LOG_BUFFER.pop();
-  if (DEBUG) logEl.textContent = LOG_BUFFER.join('\n');
+  if (DEBUG && logEl) logEl.textContent = LOG_BUFFER.join('\n');
   if (/error/i.test(line)) console.error(entry);
 }
 function setError(msg){ errorLine.textContent = msg || ''; appendLog('ERROR: ' + (msg||'')); }
@@ -417,7 +418,7 @@ async function safeRecognize(blob, opts){
 /* do OCR once */
 async function doOCROnce(){
   setError('');
-  rawEl.textContent = '—'; wordsEl.textContent = '—';
+  if (DEBUG) { rawEl.textContent = '—'; wordsEl.textContent = '—'; }
   if (!workerReady){ setError('عامل Tesseract غير جاهز'); appendLog('Worker not ready'); return null; }
   if (!videoReady){ setError('الكاميرا غير جاهزة'); appendLog('Video not ready'); return null; }
   const blob = await prepareROIBlob();
@@ -432,8 +433,11 @@ async function doOCROnce(){
   try {
     const res = await safeRecognize(blob, { lang: 'eng' });
     if (!res || !res.data){ appendLog('recognize returned no data'); setError('recognize returned no data'); return null; }
-    rawEl.textContent = res.data.text || '';
-    if (res.data.words && res.data.words.length){ wordsEl.textContent = res.data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`).join('\n'); } else wordsEl.textContent = '—';
+    if (DEBUG) rawEl.textContent = res.data.text || '';
+    if (DEBUG) {
+      if (res.data.words && res.data.words.length) wordsEl.textContent = res.data.words.map(w => `${w.text} : ${Math.round(w.confidence)}`).join('\n');
+      else wordsEl.textContent = '—';
+    }
     appendLog('recognize OK, text length: ' + (res.data.text ? res.data.text.length : 0));
     const cleaned = (res.data.text || '').replace(/\s+/g,'');
     const match = cleaned.match(TARGET_REGEX);
@@ -470,13 +474,10 @@ async function startLoop(){
   }
 }
 
-/* UI wiring and visibility controls */
+/* UI wiring */
 togglePreview.addEventListener('click', ()=>{ showPreview = !showPreview; previewCanvas.style.display = showPreview ? 'block' : 'none'; togglePreview.textContent = showPreview ? 'اخفاء المعالجة' : 'عرض المعالجة'; positionROI(); });
-
 snapBtn.addEventListener('click', async ()=>{ const b = await prepareROIBlob(); if (!b){ alert('الصورة فارغة أو صغيرة. عدّل ROI/الإضاءة'); return; } window.open(URL.createObjectURL(b), '_blank'); });
-
 runOnceBtn.addEventListener('click', async ()=>{ await doOCROnce(); });
-
 restartBtn.addEventListener('click', ()=>{ scanning = true; lastText = null; stableCount = 0; barcodeLabel.textContent = 'Waiting...'; setError(''); if (workerReady && videoReady) startLoop(); });
 
 copyLogBtn.addEventListener('click', async () => {
@@ -496,9 +497,9 @@ copyLogBtn.addEventListener('click', async () => {
   } catch(err){ appendLog('خطأ أثناء النسخ: ' + (err && err.message ? err.message : err)); setError('خطأ أثناء النسخ'); }
 });
 
-clearLogBtn && clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG) logEl.textContent=''; appendLog('log cleared'); });
+clearLogBtn && clearLogBtn.addEventListener('click', ()=>{ LOG_BUFFER.length = 0; if (DEBUG && logEl) logEl.textContent=''; appendLog('log cleared'); });
 
-flushLogsBtn && flushLogsBtn.addEventListener('click', ()=>{ logEl.textContent = LOG_BUFFER.join('\n'); });
+flushLogsBtn && flushLogsBtn.addEventListener('click', ()=>{ if (logEl) logEl.textContent = LOG_BUFFER.join('\n'); });
 
 psmSelect.addEventListener('change', ()=> appendLog('PSM changed to ' + psmSelect.value));
 upscaleSelect.addEventListener('change', ()=> appendLog('Upscale set to ' + upscaleSelect.value));
@@ -513,18 +514,16 @@ window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') {
     DEBUG = !DEBUG;
     if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
-    applyDebugVisibility();
+    setDebugUIVisible(DEBUG);
     appendLog('Debug toggled via shortcut: ' + (DEBUG ? 'on' : 'off'));
-    // show copy button and settings when debug enabled
-    if (DEBUG) copyLogBtn.classList.remove('hidden'); else copyLogBtn.classList.add('hidden');
   }
 });
 
-/* also allow explicit toggle button if visible */
+/* optional visible debug button if you want it later */
 toggleDebugBtn.addEventListener('click', ()=> {
   DEBUG = !DEBUG;
   if (DEBUG) localStorage.setItem('ocr_debug','1'); else localStorage.removeItem('ocr_debug');
-  applyDebugVisibility();
+  setDebugUIVisible(DEBUG);
   appendLog('Debug toggled via button: ' + (DEBUG ? 'on' : 'off'));
 });
 
@@ -549,7 +548,7 @@ video.addEventListener('loadedmetadata', ()=> {
 /* init */
 startCamera();
 appendLog('Page loaded; debug=' + (DEBUG ? 'on' : 'off'));
-if (DEBUG) applyDebugVisibility();
+if (DEBUG) setDebugUIVisible(true);
 if (!workerReady) initWorker();
 
 /* cleanup */
